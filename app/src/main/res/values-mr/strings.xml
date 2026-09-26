@@ -1,0 +1,13 @@
+<resources>
+    <string name="app_name">गार्डियन</string>
+    <string name="accessibility_description">गार्डियन संशयास्पद लिंक्स आणि मालवेअर उघडण्यापूर्वी तपासतो.</string>
+    <string name="secure_call">सुरक्षित कॉल</string>
+    <string name="end_call">कॉल संपवा</string>
+    <string name="block_number">नंबर ब्लॉक करा</string>
+    <string name="safe_call">सुरक्षित कॉल</string>
+    <string name="high_risk_call">अतिधोकादायक फसवणूक कॉल</string>
+    <string name="suspicious_call">संशयास्पद कॉल</string>
+    <string name="report_cybercrime">सायबर गुन्ह्याची तक्रार करा</string>
+    <string name="qr_scanner">क्यूआर स्कॅनर</string>
+    <string name="call_history">कॉल इतिहास</string>
+</resources>

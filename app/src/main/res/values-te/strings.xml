@@ -1,0 +1,13 @@
+<resources>
+    <string name="app_name">గార్డియన్</string>
+    <string name="accessibility_description">గార్డియన్ అనుమానాస్పద లింక్‌లు మరియు మాల్వేర్‌లను ముందుగానే గుర్తిస్తుంది.</string>
+    <string name="secure_call">సురక్షిత కాల్</string>
+    <string name="end_call">కాల్ ముగించు</string>
+    <string name="block_number">నంబర్ బ్లాక్ చేయి</string>
+    <string name="safe_call">సురక్షిత కాల్</string>
+    <string name="high_risk_call">అధిక ప్రమాదకర స్కామ్ కాల్</string>
+    <string name="suspicious_call">అనుమానాస్పద కాల్</string>
+    <string name="report_cybercrime">సైబర్ క్రైమ్ రిపోర్ట్ చేయండి</string>
+    <string name="qr_scanner">క్యూఆర్ స్కానర్</string>
+    <string name="call_history">కాల్ హిస్టరీ</string>
+</resources>

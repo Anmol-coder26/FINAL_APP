@@ -1,0 +1,13 @@
+<resources>
+    <string name="app_name">ગાર્ડિયન</string>
+    <string name="accessibility_description">ગાર્ડિયન છેતરપિંડીવાળી લિંક્સ અને માલવેર ખુલતા પહેલા તપાસ કરે છે.</string>
+    <string name="secure_call">સુરક્ષિત કૉલ</string>
+    <string name="end_call">કૉલ સમાપ્ત કરો</string>
+    <string name="block_number">નંબર બ્લૉક કરો</string>
+    <string name="safe_call">સુરક્ષિત કૉલ</string>
+    <string name="high_risk_call">ઉચ્ચ જોખમ સ્કેમ કૉલ</string>
+    <string name="suspicious_call">શંકાસ્પદ પ્રવૃત્તિ</string>
+    <string name="report_cybercrime">સાયબર ક્રાઇમ રિપોર્ટ કરો</string>
+    <string name="qr_scanner">QR સ્કેનર</string>
+    <string name="call_history">કૉલ ઇતિહાસ</string>
+</resources>

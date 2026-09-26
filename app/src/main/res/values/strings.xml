@@ -1,0 +1,13 @@
+<resources>
+    <string name="app_name">Guardian</string>
+    <string name="accessibility_description">Guardian checks clicked links in WhatsApp, SMS, and browsers for phishing, fake bank portals, and malware before they open.</string>
+    <string name="secure_call">Secure Call</string>
+    <string name="end_call">End Call</string>
+    <string name="block_number">Block Number</string>
+    <string name="safe_call">Safe Call</string>
+    <string name="high_risk_call">High Risk Scam Call</string>
+    <string name="suspicious_call">Suspicious Activity</string>
+    <string name="report_cybercrime">Report to Cybercrime</string>
+    <string name="qr_scanner">QR Scanner</string>
+    <string name="call_history">Call History</string>
+</resources>

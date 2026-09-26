@@ -1,0 +1,13 @@
+<resources>
+    <string name="app_name">ಗಾರ್ಡಿಯನ್</string>
+    <string name="accessibility_description">ಗಾರ್ಡಿಯನ್ ಅಪಾಯಕಾರಿ ಲಿಂಕ್‌ಗಳನ್ನು ತೆರೆಯುವ ಮೊದಲು ಪರಿಶೀಲಿಸುತ್ತದೆ.</string>
+    <string name="secure_call">ಸುರಕ್ಷಿತ ಕರೆ</string>
+    <string name="end_call">ಕರೆ ಅಂತ್ಯಗೊಳಿಸಿ</string>
+    <string name="block_number">ಸಂಖ್ಯೆಯನ್ನು ನಿರ್ಬಂಧಿಸಿ</string>
+    <string name="safe_call">ಸುರಕ್ಷಿತ ಕರೆ</string>
+    <string name="high_risk_call">ಹೆಚ್ಚಿನ ಅಪಾಯದ ವಂಚನೆ ಕರೆ</string>
+    <string name="suspicious_call">ಅನುಮಾನಾಸ್ಪದ ಚಟುವಟಿಕೆ</string>
+    <string name="report_cybercrime">ಸೈಬರ್ ಅಪರಾಧ ವರದಿ ಮಾಡಿ</string>
+    <string name="qr_scanner">QR ಸ್ಕ್ಯಾನರ್</string>
+    <string name="call_history">ಕರೆ ಇತಿಹಾಸ</string>
+</resources>

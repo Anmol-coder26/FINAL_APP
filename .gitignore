@@ -1,0 +1,41 @@
+# References
+references/
+
+# Credentials — NEVER commit these
+.env
+*/.env
+server/.env
+local.properties
+keystore.properties
+*.keystore
+*.jks
+google-services.json
+
+# Node
+node_modules/
+*/node_modules/
+
+# Build artifacts
+build/
+*/build/
+.gradle/
+app/build/
+*.apk
+*.aab
+artifacts/
+captures/
+.externalNativeBuild/
+.cxx/
+*.log
+hs_err_pid*
+replay_pid*
+
+# IDE
+.idea/
+*.iml
+.vscode/
+.kotlin/
+
+# OS
+.DS_Store
+Thumbs.db

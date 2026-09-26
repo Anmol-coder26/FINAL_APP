@@ -1,0 +1,13 @@
+<resources>
+    <string name="app_name">ഗാർഡിയൻ</string>
+    <string name="accessibility_description">വ്യാജ ലിങ്കുകളും ക്ഷുദ്രവെയറുകളും തുറക്കുന്നതിന് മുമ്പ് ഗാർഡിയൻ പരിശോധിക്കുന്നു.</string>
+    <string name="secure_call">സുരക്ഷിത കോൾ</string>
+    <string name="end_call">കോൾ അവസാനിപ്പിക്കുക</string>
+    <string name="block_number">നമ്പർ ബ്ലോക്ക് ചെയ്യുക</string>
+    <string name="safe_call">സുരക്ഷിത കോൾ</string>
+    <string name="high_risk_call">ഉയർന്ന അപകടസാധ്യതയുള്ള തട്ടിപ്പ് കോൾ</string>
+    <string name="suspicious_call">സംശയാസ്പദമായ കോൾ</string>
+    <string name="report_cybercrime">സൈബർ കുറ്റകൃത്യം റിപ്പോർട്ട് ചെയ്യുക</string>
+    <string name="qr_scanner">QR സ്കാനർ</string>
+    <string name="call_history">കോൾ ഹിസ്റ്ററി</string>
+</resources>

@@ -1,0 +1,13 @@
+<resources>
+    <string name="app_name">ਗਾਰਡੀਅਨ</string>
+    <string name="accessibility_description">ਗਾਰਡੀਅਨ ਧੋਖਾਧੜੀ ਵਾਲੇ ਲਿੰਕਾਂ ਅਤੇ ਮਾਲਵੇਅਰ ਖੁੱਲ੍ਹਣ ਤੋਂ ਪਹਿਲਾਂ ਜਾਂਚ ਕਰਦਾ ਹੈ।</string>
+    <string name="secure_call">ਸੁਰੱਖਿਅਤ ਕਾਲ</string>
+    <string name="end_call">ਕਾਲ ਸਮਾਪਤ ਕਰੋ</string>
+    <string name="block_number">ਨੰਬਰ ਬਲਾਕ ਕਰੋ</string>
+    <string name="safe_call">ਸੁਰੱਖਿਅਤ ਕਾਲ</string>
+    <string name="high_risk_call">ਉੱਚ ਜੋਖਮ ਵਾਲੀ ਸਕੈਮ ਕਾਲ</string>
+    <string name="suspicious_call">ਸ਼ੱਕੀ ਗਤੀਵਿਧੀ</string>
+    <string name="report_cybercrime">ਸਾਈਬਰ ਅਪਰਾਧ ਰਿਪੋਰਟ ਕਰੋ</string>
+    <string name="qr_scanner">QR ਸਕੈਨਰ</string>
+    <string name="call_history">ਕਾਲ ਇਤਿਹਾਸ</string>
+</resources>

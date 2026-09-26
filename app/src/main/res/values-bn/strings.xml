@@ -1,0 +1,13 @@
+<resources>
+    <string name="app_name">গার্ডিয়ান</string>
+    <string name="accessibility_description">গার্ডিয়ান সন্দেহজনক লিঙ্ক এবং ম্যালওয়্যার খোলার আগে পরীক্ষা করে।</string>
+    <string name="secure_call">সুরক্ষিত কল</string>
+    <string name="end_call">কল সমাপ্ত করুন</string>
+    <string name="block_number">নম্বর ব্লক করুন</string>
+    <string name="safe_call">নিরাপদ কল</string>
+    <string name="high_risk_call">উচ্চ ঝুঁকির স্ক্যাম কল</string>
+    <string name="suspicious_call">সন্দেহজনক কার্যকলাপ</string>
+    <string name="report_cybercrime">সাইবার অপরাধ রিপোর্ট করুন</string>
+    <string name="qr_scanner">QR স্ক্যানার</string>
+    <string name="call_history">কলের ইতিহাস</string>
+</resources>

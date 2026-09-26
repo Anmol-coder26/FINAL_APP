@@ -1,0 +1,13 @@
+<resources>
+    <string name="app_name">गार्डियन</string>
+    <string name="accessibility_description">गार्डियन व्हाट्सएप, एसएमएस और ब्राउज़र में क्लिक किए गए लिंक को फ़िशिंग, फर्जी बैंक पोर्टल और मैलवेयर के लिए खुलने से पहले जांचता है।</string>
+    <string name="secure_call">सुरक्षित कॉल</string>
+    <string name="end_call">कॉल समाप्त करें</string>
+    <string name="block_number">नंबर ब्लॉक करें</string>
+    <string name="safe_call">सुरक्षित कॉल</string>
+    <string name="high_risk_call">उच्च जोखिम धोखाधड़ी कॉल</string>
+    <string name="suspicious_call">संदिग्ध गतिविधि</string>
+    <string name="report_cybercrime">साइबर अपराध रिपोर्ट करें</string>
+    <string name="qr_scanner">क्यूआर स्कैनर</string>
+    <string name="call_history">कॉल इतिहास</string>
+</resources>

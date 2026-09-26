@@ -1,0 +1,13 @@
+<resources>
+    <string name="app_name">கார்டியன்</string>
+    <string name="accessibility_description">மோசடி வலைத்தளங்கள் மற்றும் மால்வேர்களை திறப்பதற்கு முன் கார்டியன் சரிபார்க்கிறது.</string>
+    <string name="secure_call">பாதுகாப்பான அழைப்பு</string>
+    <string name="end_call">அழைப்பை முடிக்கவும்</string>
+    <string name="block_number">எண்ணைத் தடு</string>
+    <string name="safe_call">பாதுகாப்பான அழைப்பு</string>
+    <string name="high_risk_call">அதிக ஆபத்துள்ள மோசடி அழைப்பு</string>
+    <string name="suspicious_call">சந்தேகத்திற்கிடமான செயல்பாடு</string>
+    <string name="report_cybercrime">சைபர் குற்றத்தைப் புகாரளிக்கவும்</string>
+    <string name="qr_scanner">QR ஸ்கேனர்</string>
+    <string name="call_history">அழைப்பு வரலாறு</string>
+</resources>
