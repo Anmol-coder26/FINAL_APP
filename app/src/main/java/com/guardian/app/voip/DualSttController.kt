@@ -18,24 +18,34 @@ class DualSttController(language: String = "hi") {
     val transcripts: SharedFlow<TranscriptLine> = _transcripts
 
     private val localStt = BhashiniSttClient(
-        activeLanguage = language,
+        sourceLanguage = language,
         mode = BhashiniSttClient.Mode.PUSH,
         onTranscript = { t, f ->
             _transcripts.tryEmit(TranscriptLine(Speaker.LOCAL, t, f))
         },
         onError = { err ->
-            _transcripts.tryEmit(TranscriptLine(Speaker.LOCAL, "[Local STT error: $err]", true))
+            val formatted = if (err.contains("Unable to resolve host", ignoreCase = true) || err.contains("UnknownHost", ignoreCase = true)) {
+                "⚠️ Network offline - Check internet connection for live transcription"
+            } else {
+                "⚠️ STT Warning: $err"
+            }
+            _transcripts.tryEmit(TranscriptLine(Speaker.LOCAL, formatted, true))
         }
     )
 
     private val remoteStt = BhashiniSttClient(
-        activeLanguage = language,
+        sourceLanguage = language,
         mode = BhashiniSttClient.Mode.PUSH,
         onTranscript = { t, f ->
             _transcripts.tryEmit(TranscriptLine(Speaker.REMOTE, t, f))
         },
         onError = { err ->
-            _transcripts.tryEmit(TranscriptLine(Speaker.REMOTE, "[Remote STT error: $err]", true))
+            val formatted = if (err.contains("Unable to resolve host", ignoreCase = true) || err.contains("UnknownHost", ignoreCase = true)) {
+                "⚠️ Network offline - Check internet connection for live transcription"
+            } else {
+                "⚠️ STT Warning: $err"
+            }
+            _transcripts.tryEmit(TranscriptLine(Speaker.REMOTE, formatted, true))
         }
     )
 

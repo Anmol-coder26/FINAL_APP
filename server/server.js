@@ -191,15 +191,106 @@ const trustedAlertsRouter = require('./routes/trusted_alerts');
 app.use('/alerts', trustedAlertsRouter);
 
 // -------------------------------------------------------------
-// 7. Health Check
+// 8. Family Alert System (FCM)
 // -------------------------------------------------------------
-app.get('/health', (req, res) => {
-    res.json({
-        status: "online",
-        service: "Guardian Agora Token & STT Server",
-        appIdConfigured: Boolean(APP_ID),
-        port: PORT
-    });
+let admin;
+try {
+    const fs = require('fs');
+    if (fs.existsSync('./firebase-service-account.json')) {
+        admin = require('firebase-admin');
+        const serviceAccount = require('./firebase-service-account.json');
+        admin.initializeApp({
+            credential: admin.credential.cert(serviceAccount)
+        });
+        console.log('[FCM] Firebase Admin SDK initialized');
+    } else {
+        console.warn('[FCM] firebase-service-account.json not found, mock mode active');
+    }
+} catch (e) {
+    console.warn('[FCM] Firebase init warning:', e.message);
+}
+
+// Store FCM tokens per user
+const userTokens = {};
+
+// Register FCM token
+app.post('/family/register', (req, res) => {
+    const { fcmToken, userId } = req.body;
+    if (!fcmToken || !userId) {
+        return res.status(400).json({ error: 'Missing fields' });
+    }
+    if (!userTokens[userId]) userTokens[userId] = [];
+    if (!userTokens[userId].includes(fcmToken)) {
+        userTokens[userId].push(fcmToken);
+    }
+    console.log(`[FCM] Registered token for user ${userId}`);
+    res.json({ success: true });
+});
+
+// Send family alert
+app.post('/alerts/family', async (req, res) => {
+    const {
+        protectedUserId,
+        familyUserIds,
+        protectedUserName,
+        riskScore,
+        scamType,
+        callerNumber,
+        transcriptSummary,
+        alertType
+    } = req.body;
+
+    const alertId = Date.now().toString();
+    const results = [];
+
+    const targetUserIds = familyUserIds || Object.keys(userTokens);
+
+    for (const familyUserId of targetUserIds) {
+        const tokens = userTokens[familyUserId] || [];
+
+        for (const token of tokens) {
+            try {
+                if (admin && admin.messaging) {
+                    const message = {
+                        token: token,
+                        data: {
+                            alert_type: alertType || 'scam_detected',
+                            alert_id: alertId,
+                            protected_user: protectedUserName || 'Family member',
+                            risk_score: String(riskScore || 0),
+                            scam_type: scamType || 'Unknown',
+                            caller_number: callerNumber || 'Unknown',
+                            transcript_summary: transcriptSummary || ''
+                        },
+                        android: {
+                            priority: 'high',
+                            notification: {
+                                channel_id: 'guardian_family_alerts',
+                                title: '⚠️ Scam detected',
+                                body: `${protectedUserName} may be targeted. Risk: ${riskScore}%`
+                            }
+                        }
+                    };
+
+                    const response = await admin.messaging().send(message);
+                    results.push({ token: token.slice(0, 20), success: true, response });
+                } else {
+                    console.log(`[FCM Mock] Alert to token ${token.slice(0, 10)} for ${protectedUserName}`);
+                    results.push({ token: token.slice(0, 20), success: true, mock: true });
+                }
+            } catch (error) {
+                console.error(`[FCM] Failed for token:`, error);
+                results.push({ token: token.slice(0, 20), success: false, error: error.message });
+            }
+        }
+    }
+
+    res.json({ success: true, alertId, results });
+});
+
+// Get family alert history
+app.get('/alerts/family/history/:userId', (req, res) => {
+    res.json({ alerts: [] });
 });
 
 app.listen(PORT, '0.0.0.0', () => {

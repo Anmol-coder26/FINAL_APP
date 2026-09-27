@@ -481,6 +481,23 @@ fun AIReasoningCard(
                             height = 46.dp
                         )
                     }
+                    if (report.riskScore >= 60) {
+                        val context = androidx.compose.ui.platform.LocalContext.current
+                        GxButton.Primary(
+                            text = "Capture Evidence",
+                            onClick = {
+                                val intent = android.content.Intent(context, com.guardian.app.evidence.EvidenceCaptureActivity::class.java).apply {
+                                    putExtra("riskScore", report.riskScore)
+                                    putExtra("callerId", callerNumber.ifBlank { "Unknown Caller" })
+                                    putExtra("packageName", "Guardian VoIP")
+                                    putExtra("transcript", report.explanationEn)
+                                }
+                                context.startActivity(intent)
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            height = 46.dp
+                        )
+                    }
                 }
             }
         }

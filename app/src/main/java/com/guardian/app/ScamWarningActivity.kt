@@ -21,7 +21,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
+import android.content.Intent
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.OpenInNew
 import androidx.compose.material.icons.filled.WarningAmber
@@ -211,6 +213,26 @@ fun ScamWarningCard(
                     Spacer(Modifier.width(4.dp))
                     Text("Delete message", fontSize = 12.sp, fontWeight = FontWeight.Bold)
                 }
+            }
+
+            Spacer(Modifier.height(10.dp))
+            val context = androidx.compose.ui.platform.LocalContext.current
+            OutlinedButton(
+                onClick = {
+                    val intent = Intent(context, com.guardian.app.evidence.EvidenceCaptureActivity::class.java).apply {
+                        putExtra("riskScore", score)
+                        putExtra("callerId", source.ifBlank { "Unknown Source" })
+                        putExtra("packageName", source.ifBlank { "SMS/Notification Scanner" })
+                        putExtra("transcript", "$title: $body")
+                    }
+                    context.startActivity(intent)
+                },
+                shape = RoundedCornerShape(10.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Icon(Icons.Default.CameraAlt, contentDescription = null, modifier = Modifier.size(14.dp))
+                Spacer(Modifier.width(6.dp))
+                Text("Capture Evidence", fontSize = 12.sp, color = GxTextHi, fontWeight = FontWeight.SemiBold)
             }
         }
     }

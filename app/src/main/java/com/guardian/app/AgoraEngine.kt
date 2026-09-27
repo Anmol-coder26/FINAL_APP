@@ -85,13 +85,20 @@ class AgoraEngine(
             Log.e("GuardianAgora", "Agora RTC Error Code: $err")
             if (_callState.value == AgoraCallState.CONNECTING) {
                 _callState.value = AgoraCallState.ERROR
-                listener?.onCallStateChanged(AgoraCallState.ERROR, "Agora Error: $err")
+                val message = if (err == 110) {
+                    "Agora Error 110: Join channel rejected (Check mobile data/Wi-Fi connection)"
+                } else {
+                    "Agora Error: $err"
+                }
+                listener?.onCallStateChanged(AgoraCallState.ERROR, message)
             }
         }
     }
 
     init {
-        initRtcEngine()
+        try {
+            initRtcEngine()
+        } catch (_: Exception) {}
     }
 
     private fun initRtcEngine(): RtcEngine? {
@@ -106,7 +113,7 @@ class AgoraEngine(
             rtcEngine = engine
             Log.d("GuardianAgora", "Agora RtcEngine retrieved from AgoraEngineManager singleton successfully")
         } catch (e: Exception) {
-            Log.e("GuardianAgora", "Failed to get Agora RtcEngine from AgoraEngineManager: ${e.message}", e)
+            Log.e("GuardianAgora", "Failed to get Agora RtcEngine from AgoraEngineManager: ${e.message}")
         }
         return rtcEngine
     }

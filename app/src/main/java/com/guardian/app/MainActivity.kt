@@ -36,6 +36,20 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        try {
+            com.google.firebase.messaging.FirebaseMessaging.getInstance().token.addOnCompleteListener { task ->
+                if (!task.isSuccessful) {
+                    android.util.Log.w("GuardianFCM", "Fetching FCM token failed", task.exception)
+                    return@addOnCompleteListener
+                }
+                val token = task.result
+                android.util.Log.d("GuardianFCM", "Current FCM token: ${token.take(20)}...")
+                com.guardian.app.fcm.GuardianFirebaseMessagingService().sendTokenToBackend(token)
+            }
+        } catch (e: Exception) {
+            android.util.Log.e("GuardianFCM", "Firebase messaging init fallback", e)
+        }
         setContent {
             GuardianTheme {
                 GuardianApp(

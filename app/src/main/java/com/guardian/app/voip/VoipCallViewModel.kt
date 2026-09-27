@@ -21,6 +21,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.RequestBody.Companion.toRequestBody
 
 data class VoipState(
     val status: String = "Idle",
@@ -50,7 +52,13 @@ class VoipCallViewModel(application: Application) : AndroidViewModel(application
     private var timerJob: Job? = null
     private var warningTriggered = false
     private var trustedContactAlertTriggered = false
-    private val language = "hi"
+    private var familyAlertSent = false
+    private var language: String = "hi"
+
+    private fun getSelectedLanguageFromPrefs(): String {
+        val prefs = getApplication<Application>().getSharedPreferences("guardian_prefs", android.content.Context.MODE_PRIVATE)
+        return prefs.getString("preferred_language", "hi") ?: "hi"
+    }
 
     fun startCall(channelName: String = "guardian_secure_call") {
         joinCall(channelName)
@@ -70,6 +78,7 @@ class VoipCallViewModel(application: Application) : AndroidViewModel(application
         }
         warningTriggered = false
         trustedContactAlertTriggered = false
+        familyAlertSent = false
 
         startDurationTimer()
         startBhashiniPipeline()
@@ -108,6 +117,7 @@ class VoipCallViewModel(application: Application) : AndroidViewModel(application
     }
 
     private fun startBhashiniPipeline() {
+        language = getSelectedLanguageFromPrefs()
         try {
             dualSttController = DualSttController(language).also { controller ->
                 controller.start()
@@ -133,7 +143,7 @@ class VoipCallViewModel(application: Application) : AndroidViewModel(application
                 ).also { it.register() }
             }
 
-            liveRiskAnalyzer = LiveRiskAnalyzer(analyzer) { report ->
+            liveRiskAnalyzer = LiveRiskAnalyzer(analyzer, language) { report ->
                 onRiskReportUpdated(report)
             }.also {
                 dualSttController?.let { c -> it.start(c.transcripts) }
@@ -189,6 +199,36 @@ class VoipCallViewModel(application: Application) : AndroidViewModel(application
                     topSignals = topSignals,
                     backendUrl = BuildConfig.BACKEND_URL
                 )
+            }
+        }
+
+        // Family FCM alert trigger at >= 75%
+        if (report.riskScore >= 75 && !familyAlertSent) {
+            familyAlertSent = true
+            viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                try {
+                    val payload = org.json.JSONObject().apply {
+                        put("protectedUserId", "protected_user_1")
+                        put("familyUserIds", org.json.JSONArray().apply { put("family_member_1") })
+                        put("protectedUserName", "Protected Member")
+                        put("riskScore", report.riskScore)
+                        put("scamType", report.topSignals.firstOrNull()?.title ?: "Impersonation Risk")
+                        put("callerNumber", _state.value.channelName.ifBlank { "VoIP Caller" })
+                        put("transcriptSummary", report.explanationEn)
+                        put("alertType", "scam_call")
+                    }
+
+                    val body = payload.toString().toRequestBody("application/json".toMediaType())
+                    val request = okhttp3.Request.Builder()
+                        .url("${BuildConfig.BACKEND_URL}/alerts/family")
+                        .post(body)
+                        .build()
+
+                    okhttp3.OkHttpClient().newCall(request).execute()
+                    android.util.Log.d("GuardianFCM", "Family FCM alert sent successfully")
+                } catch (e: Exception) {
+                    android.util.Log.e("GuardianFCM", "Family FCM alert failed", e)
+                }
             }
         }
     }

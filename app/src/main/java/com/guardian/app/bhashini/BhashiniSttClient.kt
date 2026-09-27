@@ -21,13 +21,17 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 
 class BhashiniSttClient(
-    private var activeLanguage: String = "hi",
+    var sourceLanguage: String = "hi",
     val mode: Mode = Mode.MICROPHONE,
     private val onTranscript: (text: String, isFinal: Boolean) -> Unit,
     private val onError: (error: String) -> Unit = {},
     private val onPcmChunk: ((ShortArray) -> Unit)? = null
 ) {
     enum class Mode { MICROPHONE, PUSH }
+
+    var activeLanguage: String
+        get() = sourceLanguage
+        set(value) { sourceLanguage = value }
 
     // Secondary constructor for backward compatibility with existing microphone call sites
     constructor(

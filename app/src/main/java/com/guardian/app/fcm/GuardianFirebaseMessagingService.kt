@@ -1,106 +1,100 @@
 package com.guardian.app.fcm
 
-import android.app.NotificationChannel
-import android.app.NotificationManager
-import android.app.PendingIntent
-import android.content.Context
-import android.content.Intent
-import android.os.Build
 import android.util.Log
-import androidx.core.app.NotificationCompat
+import com.google.firebase.messaging.FirebaseMessagingService
+import com.google.firebase.messaging.RemoteMessage
 import com.guardian.app.BuildConfig
-import com.guardian.app.MainActivity
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import okhttp3.*
 import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.OkHttpClient
-import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
 
-/**
- * F27 Family Alert via FCM & Backend Push
- */
-class GuardianFirebaseMessagingService {
+class GuardianFirebaseMessagingService : FirebaseMessagingService() {
 
-    companion object {
-        private const val TAG = "FamilyAlertService"
-        private const val CHANNEL_ID = "guardian_family_channel"
+    override fun onNewToken(token: String) {
+        super.onNewToken(token)
+        Log.d("GuardianFCM", "New FCM token: ${token.take(20)}...")
+        sendTokenToBackend(token)
+    }
 
-        /**
-         * Register device FCM token with the Guardian backend server
-         */
-        fun registerTokenWithBackend(context: Context, token: String, deviceName: String = Build.MODEL) {
-            CoroutineScope(Dispatchers.IO).launch {
-                try {
-                    val client = OkHttpClient()
-                    val payload = JSONObject().apply {
-                        put("token", token)
-                        put("deviceName", deviceName)
-                    }
-                    val request = Request.Builder()
-                        .url("${BuildConfig.BACKEND_URL}/alerts/family/register")
-                        .post(payload.toString().toRequestBody("application/json".toMediaType()))
-                        .build()
+    override fun onMessageReceived(remoteMessage: RemoteMessage) {
+        super.onMessageReceived(remoteMessage)
+        Log.d("GuardianFCM", "Message received from: ${remoteMessage.from}")
 
-                    val resp = client.newCall(request).execute()
-                    if (resp.isSuccessful) {
-                        Log.d(TAG, "Device registered for family alerts with token: ${token.take(8)}...")
-                    }
-                } catch (e: Exception) {
-                    Log.e(TAG, "Failed to register family FCM token: ${e.message}")
-                }
-            }
+        // Handle data payload
+        val data = remoteMessage.data
+        if (data.isNotEmpty()) {
+            Log.d("GuardianFCM", "Data payload: $data")
+            handleFamilyAlert(data)
         }
 
-        /**
-         * Display high-priority family emergency alert notification
-         */
-        fun showFamilyAlertNotification(
-            context: Context,
-            contactName: String,
-            callerNumber: String,
-            riskScore: Int,
-            signals: List<String>
-        ) {
-            val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                val channel = NotificationChannel(
-                    CHANNEL_ID,
-                    "Guardian Family Emergency Alerts",
-                    NotificationManager.IMPORTANCE_HIGH
-                ).apply {
-                    description = "Instant notifications when high-risk calls target family members"
-                    enableVibration(true)
-                }
-                manager.createNotificationChannel(channel)
-            }
+        // Handle notification payload (if present)
+        remoteMessage.notification?.let {
+            Log.d("GuardianFCM", "Notification: ${it.title} - ${it.body}")
+        }
+    }
 
-            val intent = Intent(context, MainActivity::class.java).apply {
-                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
-            }
-            val pendingIntent = PendingIntent.getActivity(
-                context,
-                System.currentTimeMillis().toInt(),
-                intent,
-                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+    private fun handleFamilyAlert(data: Map<String, String>) {
+        val alertType = data["alert_type"] ?: "scam_detected"
+        val protectedUserName = data["protected_user"] ?: "Family member"
+        val riskScore = data["risk_score"]?.toIntOrNull() ?: 0
+        val scamType = data["scam_type"] ?: "Unknown"
+        val callerNumber = data["caller_number"] ?: "Unknown"
+        val transcriptSummary = data["transcript_summary"] ?: ""
+
+        // Show a local notification with detailed info
+        GuardianNotificationHelper.showFamilyAlert(
+            context = this,
+            alertType = alertType,
+            protectedUserName = protectedUserName,
+            riskScore = riskScore,
+            scamType = scamType,
+            callerNumber = callerNumber,
+            transcriptSummary = transcriptSummary
+        )
+
+        // Save to local database for the in-app report
+        CoroutineScope(Dispatchers.IO).launch {
+            FamilyAlertStore.save(
+                context = applicationContext,
+                alertId = data["alert_id"] ?: System.currentTimeMillis().toString(),
+                protectedUserName = protectedUserName,
+                riskScore = riskScore,
+                scamType = scamType,
+                callerNumber = callerNumber,
+                transcriptSummary = transcriptSummary,
+                timestamp = System.currentTimeMillis()
             )
-
-            val title = "🚨 Guardian Family Alert: $contactName"
-            val text = "Suspicious call from $callerNumber ($riskScore% Risk). Signals: ${signals.joinToString(", ")}"
-
-            val notification = NotificationCompat.Builder(context, CHANNEL_ID)
-                .setSmallIcon(android.R.drawable.ic_dialog_alert)
-                .setContentTitle(title)
-                .setContentText(text)
-                .setStyle(NotificationCompat.BigTextStyle().bigText(text))
-                .setPriority(NotificationCompat.PRIORITY_MAX)
-                .setAutoCancel(true)
-                .setContentIntent(pendingIntent)
-                .build()
-
-            manager.notify(System.currentTimeMillis().toInt(), notification)
         }
+    }
+
+    fun sendTokenToBackend(token: String) {
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                val payload = JSONObject().apply {
+                    put("fcmToken", token)
+                    put("userId", getUserId())
+                    put("timestamp", System.currentTimeMillis())
+                }
+
+                val request = Request.Builder()
+                    .url("${BuildConfig.BACKEND_URL}/family/register")
+                    .post(payload.toString().toRequestBody("application/json".toMediaType()))
+                    .build()
+
+                OkHttpClient().newCall(request).execute()
+                Log.d("GuardianFCM", "Token registered with backend")
+            } catch (e: Exception) {
+                Log.e("GuardianFCM", "Token registration failed", e)
+            }
+        }
+    }
+
+    private fun getUserId(): String {
+        return getSharedPreferences("guardian_secure_prefs", MODE_PRIVATE)
+            .getString("user_id", "anonymous") ?: "anonymous"
     }
 }

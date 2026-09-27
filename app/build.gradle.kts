@@ -5,6 +5,7 @@ plugins {
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
     id("com.google.devtools.ksp")
+    id("com.google.gms.google-services")
 }
 
 val localProperties = Properties().apply {
@@ -138,6 +139,10 @@ dependencies {
 
     // OkHttp for Bhashini Streaming STT WebSocket & REST Translation/TTS
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
+
+    // Firebase Cloud Messaging
+    implementation(platform("com.google.firebase:firebase-bom:33.7.0"))
+    implementation("com.google.firebase:firebase-messaging-ktx")
 
     debugImplementation("androidx.compose.ui:ui-tooling")
     testImplementation("junit:junit:4.13.2")

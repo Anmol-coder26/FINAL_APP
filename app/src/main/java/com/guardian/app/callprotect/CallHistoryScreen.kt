@@ -435,6 +435,24 @@ private fun CallDetailModal(
                         )
                     }
                 }
+
+                item {
+                    val context = androidx.compose.ui.platform.LocalContext.current
+                    GxButton.Primary(
+                        text = "Generate Report",
+                        onClick = {
+                            val intent = android.content.Intent(context, com.guardian.app.evidence.EvidenceCaptureActivity::class.java).apply {
+                                putExtra("riskScore", entry.riskScore)
+                                putExtra("callerId", entry.number)
+                                putExtra("packageName", "Guardian Call Audit")
+                                putExtra("transcript", entry.transcriptSummary)
+                            }
+                            context.startActivity(intent)
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        height = 42.dp
+                    )
+                }
             }
         },
         confirmButton = {

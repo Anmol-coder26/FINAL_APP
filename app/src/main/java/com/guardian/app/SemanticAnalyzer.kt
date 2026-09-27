@@ -546,10 +546,34 @@ class SemanticAnalyzer(
             Log.e("GuardianAI", "Gemini call failed with exception: ${e.javaClass.simpleName} - ${e.message}. Falling back to offline engine.")
             val report = KeywordScorer.score(windowedTranscript)
             val elapsed = System.currentTimeMillis() - startTime
-            val finalReport = report.copy(isOffline = true, latencyMs = elapsed, source = "offline_fallback")
-            lastValidReport = finalReport
-            finalReport
+            val offlineReport = report.copy(isOffline = true, latencyMs = elapsed, source = "offline")
+            lastValidReport = offlineReport
+            offlineReport
         }
+    }
+
+    suspend fun analyzeMultilingual(
+        transcript: String,
+        language: String
+    ): RiskReport {
+        // 1. Regional keyword match
+        val keywordScore = com.guardian.app.protect.RegionalScamKeywords.score(transcript, language)
+        val keywordCategories = com.guardian.app.protect.RegionalScamKeywords.categories(transcript, language)
+
+        // 2. Translate to English for Gemini if not English
+        val englishText = if (language != "en" && language.isNotBlank()) {
+            com.guardian.app.bhashini.BhashiniTranslateClient.translate(transcript, language, "en")
+        } else transcript
+
+        // 3. Call Gemini with English text
+        val geminiReport = analyzeChunk(englishText)
+
+        // 4. Blend scores: keyword score weights 30%, Gemini weights 70%
+        val blendedScore = (keywordScore * 0.3 + geminiReport.riskScore * 0.7).toInt().coerceIn(0, 98)
+
+        return geminiReport.copy(
+            riskScore = maxOf(keywordScore, blendedScore)
+        )
     }
 
     suspend fun analyzeNotificationMultilingual(

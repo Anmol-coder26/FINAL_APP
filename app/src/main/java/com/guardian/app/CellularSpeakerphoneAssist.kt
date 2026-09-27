@@ -31,7 +31,7 @@ class CellularSpeakerphoneAssist(
         if (isActive) return
         Log.d("SpeakerphoneAssist", "Starting Speakerphone Assist mode (MICROPHONE)")
         sttClient = BhashiniSttClient(
-            activeLanguage = language,
+            sourceLanguage = language,
             mode = BhashiniSttClient.Mode.MICROPHONE,
             onTranscript = { text, isFinal ->
                 onTranscript(text, isFinal)

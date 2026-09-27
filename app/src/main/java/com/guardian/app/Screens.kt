@@ -450,16 +450,16 @@ fun OnboardingScreen(name: String, onComplete: () -> Unit) {
                         )
 
                         val languages = listOf(
-                            "hi" to "Hindi (हिंदी)",
-                            "en" to "English",
+                            "hi" to "Hindi (हिन्दी)",
                             "ta" to "Tamil (தமிழ்)",
                             "te" to "Telugu (తెలుగు)",
                             "bn" to "Bengali (বাংলা)",
                             "mr" to "Marathi (मराठी)",
                             "kn" to "Kannada (ಕನ್ನಡ)",
                             "ml" to "Malayalam (മലയാളം)",
+                            "pa" to "Punjabi (ਪੰਜਾਬੀ)",
                             "gu" to "Gujarati (ગુજરાતી)",
-                            "pa" to "Punjabi (ਪੰਜਾਬੀ)"
+                            "en" to "English"
                         )
 
                         @OptIn(ExperimentalLayoutApi::class)
@@ -1193,8 +1193,16 @@ fun SettingsScreen(
                     Text("Select warning and reasoning language:", color = GxTextLo, fontSize = 12.sp)
 
                     val languages = listOf(
-                        "hi" to "Hindi", "en" to "English", "ta" to "Tamil", "te" to "Telugu",
-                        "bn" to "Bengali", "mr" to "Marathi", "kn" to "Kannada", "ml" to "Malayalam"
+                        "hi" to "Hindi (हिन्दी)",
+                        "ta" to "Tamil (தமிழ்)",
+                        "te" to "Telugu (తెలుగు)",
+                        "bn" to "Bengali (বাংলা)",
+                        "mr" to "Marathi (मराठी)",
+                        "kn" to "Kannada (ಕನ್ನಡ)",
+                        "ml" to "Malayalam (മലയാളം)",
+                        "pa" to "Punjabi (ਪੰਜਾਬੀ)",
+                        "gu" to "Gujarati (ગુજરાતી)",
+                        "en" to "English"
                     )
 
                     @OptIn(ExperimentalLayoutApi::class)
