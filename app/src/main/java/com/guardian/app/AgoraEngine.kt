@@ -142,9 +142,14 @@ class AgoraEngine(
 
                 // 1. Join RTC channel for voice audio transmission
                 engine.setClientRole(Constants.CLIENT_ROLE_BROADCASTER)
-                val tokenToPass = if (activeRtcToken.isBlank()) null else activeRtcToken
-                val joinResult = engine.joinChannel(tokenToPass, channelName, null, uid)
+                val tokenToPass = if (activeRtcToken.isBlank()) "" else activeRtcToken
+                var joinResult = engine.joinChannel(tokenToPass, channelName, "", uid)
                 if (joinResult != Constants.ERR_OK) {
+                    Log.w("GuardianAgora", "joinChannel with token failed (code: $joinResult), retrying tokenless join...")
+                    joinResult = engine.joinChannel("", channelName, "", uid)
+                }
+                if (joinResult != Constants.ERR_OK) {
+                    Log.e("GuardianAgora", "joinChannel primary and fallback failed with code: $joinResult")
                     _callState.value = AgoraCallState.ERROR
                     listener.onCallStateChanged(AgoraCallState.ERROR, "Join failed (code: $joinResult)")
                     return@launch
@@ -162,7 +167,7 @@ class AgoraEngine(
                 Log.e("GuardianAgora", "Start call exception, attempting fallback join: ${e.message}")
                 try {
                     engine.setClientRole(Constants.CLIENT_ROLE_BROADCASTER)
-                    val joinResult = engine.joinChannel(null, channelName, null, uid)
+                    val joinResult = engine.joinChannel("", channelName, "", uid)
                     if (joinResult != Constants.ERR_OK) {
                         _callState.value = AgoraCallState.ERROR
                         listener.onCallStateChanged(AgoraCallState.ERROR, "Join fallback failed (code: $joinResult)")
