@@ -96,38 +96,17 @@ class AgoraEngine(
 
     private fun initRtcEngine(): RtcEngine? {
         if (rtcEngine != null) return rtcEngine
-        val appId = BuildConfig.AGORA_APP_ID.ifBlank { "d575bd8b35004ad896366419f3a8a8f1" }
-        if (appId.isBlank()) {
-            Log.e("GuardianAgora", "AGORA_APP_ID is not configured in BuildConfig")
-            return null
-        }
-
         try {
-            val engine = try {
-                RtcEngine.create(context.applicationContext, appId, rtcEventHandler)
-            } catch (e: Exception) {
-                Log.w("GuardianAgora", "Classic RtcEngine.create failed, trying RtcEngineConfig: ${e.message}")
-                val config = RtcEngineConfig().apply {
-                    mContext = context.applicationContext
-                    mAppId = appId
-                    mEventHandler = rtcEventHandler
-                    mChannelProfile = Constants.CHANNEL_PROFILE_COMMUNICATION
-                }
-                RtcEngine.create(config)
-            }
-
-            if (engine != null) {
-                engine.setChannelProfile(Constants.CHANNEL_PROFILE_COMMUNICATION)
-                engine.enableAudio()
-                engine.enableAudioVolumeIndication(200, 3, true)
-                engine.setAudioProfile(Constants.AUDIO_PROFILE_SPEECH_STANDARD)
-                rtcEngine = engine
-                Log.d("GuardianAgora", "Agora RtcEngine initialized successfully with App ID: ${appId.take(4)}...${appId.takeLast(4)}")
-            } else {
-                Log.e("GuardianAgora", "RtcEngine.create returned null!")
-            }
+            val engine = com.guardian.app.core.AgoraEngineManager.get(context)
+            engine.addHandler(rtcEventHandler)
+            engine.setChannelProfile(Constants.CHANNEL_PROFILE_COMMUNICATION)
+            engine.enableAudio()
+            engine.enableAudioVolumeIndication(200, 3, true)
+            engine.setAudioProfile(Constants.AUDIO_PROFILE_SPEECH_STANDARD)
+            rtcEngine = engine
+            Log.d("GuardianAgora", "Agora RtcEngine retrieved from AgoraEngineManager singleton successfully")
         } catch (e: Exception) {
-            Log.e("GuardianAgora", "Failed to initialize Agora RtcEngine: ${e.message}", e)
+            Log.e("GuardianAgora", "Failed to get Agora RtcEngine from AgoraEngineManager: ${e.message}", e)
         }
         return rtcEngine
     }
@@ -294,7 +273,7 @@ class AgoraEngine(
         try {
             RtmClient.release()
             rtmClient = null
-            RtcEngine.destroy()
+            rtcEngine?.removeHandler(rtcEventHandler)
         } catch (_: Exception) {}
         rtcEngine = null
     }

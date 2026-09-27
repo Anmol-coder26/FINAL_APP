@@ -693,6 +693,13 @@ fun HomeScreen(
             ) {
                 val ctx = androidx.compose.ui.platform.LocalContext.current
                 GxChip(
+                    text = "Live AI Guard",
+                    icon = Icons.Default.Shield,
+                    variant = GxChipVariant.Brand,
+                    height = 42.dp,
+                    onClick = onOpenCallRisk
+                )
+                GxChip(
                     text = "Secure VoIP",
                     icon = Icons.Default.PhoneInTalk,
                     variant = GxChipVariant.Brand,
