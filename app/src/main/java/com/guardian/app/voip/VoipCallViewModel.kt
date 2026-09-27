@@ -119,7 +119,7 @@ class VoipCallViewModel(application: Application) : AndroidViewModel(application
     private fun startBhashiniPipeline() {
         language = getSelectedLanguageFromPrefs()
         try {
-            dualSttController = DualSttController(language).also { controller ->
+            dualSttController = DualSttController(context = getApplication(), language = language).also { controller ->
                 controller.start()
 
                 // Collect transcripts

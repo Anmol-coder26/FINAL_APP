@@ -1,5 +1,6 @@
 package com.guardian.app.bhashini
 
+import android.content.Context
 import android.util.Log
 import com.guardian.app.RiskReport
 import com.guardian.app.SemanticAnalyzer
@@ -12,6 +13,7 @@ import kotlinx.coroutines.launch
 
 class GuardianAnalysisPipeline(
     private val analyzer: SemanticAnalyzer,
+    private val context: Context? = null,
     private val onRiskUpdate: (RiskReport) -> Unit,
     private val onError: (String) -> Unit = {},
     private val onPcmChunk: ((ShortArray) -> Unit)? = null
@@ -23,6 +25,7 @@ class GuardianAnalysisPipeline(
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var sttClient: BhashiniSttClient? = null
+    private var nativeFallback: AndroidSpeechRecognizerFallback? = null
     private var sourceLanguage: String = "hi"
     private val transcriptBuffer = StringBuilder()
     private var analysisJob: Job? = null
@@ -32,11 +35,14 @@ class GuardianAnalysisPipeline(
         transcriptBuffer.clear()
 
         sttClient = BhashiniSttClient(
+            sourceLanguage = language,
+            mode = BhashiniSttClient.Mode.MICROPHONE,
             onTranscript = { text, isFinal ->
                 handleTranscript(text, isFinal)
             },
             onError = { error ->
-                Log.e(TAG, "STT Pipeline error: $error")
+                Log.e(TAG, "STT Pipeline error: $error. Triggering native SpeechRecognizer fallback.")
+                startNativeFallback(language)
                 onError(error)
             },
             onPcmChunk = onPcmChunk
@@ -46,8 +52,25 @@ class GuardianAnalysisPipeline(
             sttClient?.start(language)
             Log.d(TAG, "Guardian Bhashini pipeline started with language: $language")
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to start Bhashini pipeline: ${e.message}")
+            Log.e(TAG, "Failed to start Bhashini pipeline: ${e.message}. Triggering fallback.")
+            startNativeFallback(language)
             onError(e.message ?: "Pipeline start failed")
+        }
+    }
+
+    private fun startNativeFallback(language: String) {
+        if (context != null && nativeFallback == null) {
+            Log.d(TAG, "Starting native Android SpeechRecognizer fallback for language: $language")
+            nativeFallback = AndroidSpeechRecognizerFallback(
+                context = context,
+                language = language,
+                onTranscript = { text, isFinal ->
+                    handleTranscript(text, isFinal)
+                },
+                onError = { err ->
+                    Log.e(TAG, "Native SpeechRecognizer error: $err")
+                }
+            ).also { it.start() }
         }
     }
 
@@ -75,7 +98,11 @@ class GuardianAnalysisPipeline(
                     val englishChunk = if (sourceLanguage.equals("en", ignoreCase = true)) {
                         currentFullText
                     } else {
-                        BhashiniTranslateClient.translate(currentFullText, sourceLanguage, "en")
+                        try {
+                            BhashiniTranslateClient.translate(currentFullText, sourceLanguage, "en")
+                        } catch (_: Exception) {
+                            currentFullText
+                        }
                     }
 
                     // 2. Perform deep multi-engine semantic analysis
@@ -85,7 +112,11 @@ class GuardianAnalysisPipeline(
                     val localizedExplanation = if (sourceLanguage.equals("en", ignoreCase = true)) {
                         report.explanationEn
                     } else {
-                        BhashiniTranslateClient.translate(report.explanationEn, "en", sourceLanguage)
+                        try {
+                            BhashiniTranslateClient.translate(report.explanationEn, "en", sourceLanguage)
+                        } catch (_: Exception) {
+                            report.explanationEn
+                        }
                     }
 
                     val finalReport = report.copy(
@@ -106,11 +137,17 @@ class GuardianAnalysisPipeline(
             sttClient?.stop()
         } catch (_: Exception) {}
         sttClient = null
+
+        try {
+            nativeFallback?.stop()
+        } catch (_: Exception) {}
+        nativeFallback = null
+
         analysisJob?.cancel()
         synchronized(transcriptBuffer) {
             transcriptBuffer.clear()
         }
         scope.cancel()
-        Log.d(TAG, "Guardian Bhashini pipeline stopped")
+        Log.d(TAG, "Guardian analysis pipeline stopped")
     }
 }

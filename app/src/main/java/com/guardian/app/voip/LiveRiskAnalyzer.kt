@@ -52,14 +52,11 @@ class LiveRiskAnalyzer(
                     }
                 }
 
-                val regionalKeywords = RegionalScamKeywords.getKeywordsForLanguage(language)
-                for (kw in regionalKeywords) {
-                    if (lower.contains(kw.keyword.lowercase())) {
-                        val weight = (kw.weight * 100).toInt()
-                        if (weight > instantScore) {
-                            instantScore = weight
-                            detectedKeyword = kw.keyword
-                        }
+                val regionalMatches = RegionalScamKeywords.match(line.text, language)
+                for (kw in regionalMatches) {
+                    if (kw.weight > instantScore) {
+                        instantScore = kw.weight
+                        detectedKeyword = kw.phrase
                     }
                 }
 
@@ -67,9 +64,8 @@ class LiveRiskAnalyzer(
                     currentScore = instantScore
                     val instantReport = RiskReport(
                         riskScore = currentScore,
-                        topSignals = listOf("Critical keyword: ${detectedKeyword.ifBlank { "Scam indicator" }}"),
-                        explanationEn = "High-risk keyword detected in conversation.",
-                        explanationHi = "बातचीत में उच्च जोखिम शब्द मिला।"
+                        explanationEn = "High-risk keyword '${detectedKeyword.ifBlank { "Scam indicator" }}' detected in conversation.",
+                        explanationHi = "बातचीत में उच्च जोखिम शब्द '${detectedKeyword.ifBlank { "धोखाधड़ी संकेत" }}' मिला।"
                     )
                     withContext(Dispatchers.Main) { onReport(instantReport) }
                 }

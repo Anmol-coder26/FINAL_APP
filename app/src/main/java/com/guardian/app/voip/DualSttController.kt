@@ -1,5 +1,8 @@
 package com.guardian.app.voip
 
+import android.content.Context
+import android.util.Log
+import com.guardian.app.bhashini.AndroidSpeechRecognizerFallback
 import com.guardian.app.bhashini.BhashiniSttClient
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -13,9 +16,14 @@ data class TranscriptLine(
     val timestamp: Long = System.currentTimeMillis()
 )
 
-class DualSttController(language: String = "hi") {
+class DualSttController(
+    private val context: Context? = null,
+    private val language: String = "hi"
+) {
     private val _transcripts = MutableSharedFlow<TranscriptLine>(extraBufferCapacity = 256)
     val transcripts: SharedFlow<TranscriptLine> = _transcripts
+
+    private var nativeFallback: AndroidSpeechRecognizerFallback? = null
 
     private val localStt = BhashiniSttClient(
         sourceLanguage = language,
@@ -24,12 +32,8 @@ class DualSttController(language: String = "hi") {
             _transcripts.tryEmit(TranscriptLine(Speaker.LOCAL, t, f))
         },
         onError = { err ->
-            val formatted = if (err.contains("Unable to resolve host", ignoreCase = true) || err.contains("UnknownHost", ignoreCase = true)) {
-                "⚠️ Network offline - Check internet connection for live transcription"
-            } else {
-                "⚠️ STT Warning: $err"
-            }
-            _transcripts.tryEmit(TranscriptLine(Speaker.LOCAL, formatted, true))
+            Log.w("DualSttController", "Local Bhashini STT notice: $err. Triggering fallback.")
+            startNativeFallback()
         }
     )
 
@@ -40,14 +44,25 @@ class DualSttController(language: String = "hi") {
             _transcripts.tryEmit(TranscriptLine(Speaker.REMOTE, t, f))
         },
         onError = { err ->
-            val formatted = if (err.contains("Unable to resolve host", ignoreCase = true) || err.contains("UnknownHost", ignoreCase = true)) {
-                "⚠️ Network offline - Check internet connection for live transcription"
-            } else {
-                "⚠️ STT Warning: $err"
-            }
-            _transcripts.tryEmit(TranscriptLine(Speaker.REMOTE, formatted, true))
+            Log.w("DualSttController", "Remote Bhashini STT notice: $err")
         }
     )
+
+    private fun startNativeFallback() {
+        if (context != null && nativeFallback == null) {
+            Log.d("DualSttController", "Starting Android native SpeechRecognizer fallback for language: $language")
+            nativeFallback = AndroidSpeechRecognizerFallback(
+                context = context,
+                language = language,
+                onTranscript = { t, f ->
+                    _transcripts.tryEmit(TranscriptLine(Speaker.LOCAL, t, f))
+                },
+                onError = { err ->
+                    Log.e("DualSttController", "Native SpeechRecognizer error: $err")
+                }
+            ).also { it.start() }
+        }
+    }
 
     fun start() {
         localStt.start()
@@ -61,5 +76,7 @@ class DualSttController(language: String = "hi") {
     fun stop() {
         localStt.stop()
         remoteStt.stop()
+        nativeFallback?.stop()
+        nativeFallback = null
     }
 }
