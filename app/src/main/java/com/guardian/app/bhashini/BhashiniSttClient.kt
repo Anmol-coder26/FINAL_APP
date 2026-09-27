@@ -135,6 +135,10 @@ class BhashiniSttClient(
             while (pushBuffer.size() >= CHUNK_SIZE_BYTES) {
                 val fullBytes = pushBuffer.toByteArray()
                 val chunk = fullBytes.copyOfRange(0, CHUNK_SIZE_BYTES)
+                if (logChunkCount < 5) {
+                    logChunkCount++
+                    Log.d("Guardian", "Chunk size: ${chunk.size} bytes, sampleRate: $sampleRate")
+                }
                 webSocket?.send(chunk.toByteString())
 
                 pushBuffer.reset()
@@ -165,6 +169,8 @@ class BhashiniSttClient(
         return out
     }
 
+    private var logChunkCount = 0
+
     private fun sendStartEvent(ws: WebSocket, lang: String) {
         try {
             val startPayload = JSONObject().apply {
@@ -178,10 +184,11 @@ class BhashiniSttClient(
                     put("numChannels", 1)
                 })
                 put("vadConfig", JSONObject().apply {
-                    put("pStart", 0.6)
-                    put("pauseMs", 400)
+                    put("pStart", 0.4)
+                    put("pauseMs", 800)
                 })
                 put("interimIntervalMs", 200)
+                put("preProcessors", org.json.JSONArray().apply { put("vad") })
             }
             ws.send(startPayload.toString())
             Log.d(TAG, "Sent STT start event for lang: $lang (Mode: $mode)")

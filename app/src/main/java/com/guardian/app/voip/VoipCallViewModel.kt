@@ -72,13 +72,13 @@ class VoipCallViewModel(application: Application) : AndroidViewModel(application
         trustedContactAlertTriggered = false
 
         startDurationTimer()
+        startBhashiniPipeline()
 
         // 1. Join Agora RTC Call
         agoraEngine.startCall(
             channelName = channelName,
             listener = object : AgoraTranscriptListener {
                 override fun onTranscriptReceived(text: String, isFinal: Boolean, speakerUid: Int) {
-                    // Fallback Agora STT listener if Bhashini is inactive
                     if (_state.value.banner == "Agora fallback active") {
                         val speaker = if (speakerUid == 0 || speakerUid == 998) Speaker.LOCAL else Speaker.REMOTE
                         handleNewTranscript(TranscriptLine(speaker, text, isFinal))
@@ -89,7 +89,6 @@ class VoipCallViewModel(application: Application) : AndroidViewModel(application
                     when (state) {
                         AgoraCallState.IN_CALL -> {
                             _state.update { it.copy(status = "In Secure Call", isConnected = true) }
-                            startBhashiniPipeline()
                         }
                         AgoraCallState.CONNECTING -> {
                             _state.update { it.copy(status = "Connecting...", isConnected = false) }

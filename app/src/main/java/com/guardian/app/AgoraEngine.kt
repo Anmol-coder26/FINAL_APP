@@ -45,7 +45,7 @@ interface AgoraTranscriptListener {
 
 class AgoraEngine(
     private val context: Context,
-    private val tokenServerBaseUrl: String = "http://192.168.29.62:3001"
+    private val tokenServerBaseUrl: String = "http://10.252.26.51:3001"
 ) {
     private var rtcEngine: RtcEngine? = null
     private var rtmClient: RtmClient? = null

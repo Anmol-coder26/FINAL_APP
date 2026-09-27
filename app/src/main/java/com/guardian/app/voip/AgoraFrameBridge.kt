@@ -100,7 +100,7 @@ class AgoraFrameBridge(
         avSyncType: Int
     ): Boolean = true
 
-    override fun getObservedAudioFramePosition(): Int = 1 or 2 // POSITION_RECORD (1) | POSITION_PLAYBACK_BEFORE_MIXING (2)
+    override fun getObservedAudioFramePosition(): Int = 0x0008 or 0x0001 // AUDIO_FRAME_POSITION_BEFORE_MIXING | AUDIO_FRAME_POSITION_RECORD (0x0009)
 
     override fun getRecordAudioParams(): AudioParams? = null
     override fun getPlaybackAudioParams(): AudioParams? = null

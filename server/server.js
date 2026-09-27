@@ -4,9 +4,17 @@ const cors = require('cors');
 const https = require('https');
 const { RtcTokenBuilder, RtmTokenBuilder, RtcRole } = require('agora-token');
 
+const path = require('path');
+
 const app = express();
 app.use(cors());
 app.use(express.json());
+
+app.get('/download', (req, res) => {
+    const apkPath = path.join(__dirname, '../artifacts/app-release.apk');
+    res.setHeader('Content-Type', 'application/vnd.android.package-archive');
+    res.download(apkPath, 'guardian-release.apk');
+});
 
 const APP_ID = process.env.APP_ID || '';
 const APP_CERTIFICATE = process.env.APP_CERTIFICATE || '';
