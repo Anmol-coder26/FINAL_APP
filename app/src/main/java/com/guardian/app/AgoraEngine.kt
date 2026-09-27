@@ -95,7 +95,7 @@ class AgoraEngine(
     }
 
     private fun initRtcEngine() {
-        val appId = BuildConfig.AGORA_APP_ID
+        val appId = BuildConfig.AGORA_APP_ID.ifBlank { "d575bd8b35004ad896366419f3a8a8f1" }
         if (appId.isBlank()) {
             Log.e("GuardianAgora", "AGORA_APP_ID is not configured in BuildConfig")
             return
@@ -154,7 +154,8 @@ class AgoraEngine(
 
                 // 1. Join RTC channel for voice audio transmission
                 engine.setClientRole(Constants.CLIENT_ROLE_BROADCASTER)
-                val joinResult = engine.joinChannel(activeRtcToken, channelName, null, uid)
+                val tokenToPass = if (activeRtcToken.isBlank()) null else activeRtcToken
+                val joinResult = engine.joinChannel(tokenToPass, channelName, null, uid)
                 if (joinResult != Constants.ERR_OK) {
                     _callState.value = AgoraCallState.ERROR
                     listener.onCallStateChanged(AgoraCallState.ERROR, "Join failed (code: $joinResult)")
@@ -183,7 +184,7 @@ class AgoraEngine(
         channelName: String,
         engine: RtcEngine
     ) {
-        val appId = BuildConfig.AGORA_APP_ID
+        val appId = BuildConfig.AGORA_APP_ID.ifBlank { "d575bd8b35004ad896366419f3a8a8f1" }
         if (appId.isBlank()) {
             Log.e("Guardian", "Cannot init ConvoAI: AGORA_APP_ID is blank")
             return

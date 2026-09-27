@@ -12,8 +12,8 @@ const APP_ID = process.env.APP_ID || '';
 const APP_CERTIFICATE = process.env.APP_CERTIFICATE || '';
 const PORT = process.env.PORT || 3001;
 
-if (!APP_ID || !APP_CERTIFICATE) {
-    console.error("FATAL: APP_ID and APP_CERTIFICATE must be set in .env");
+if (!APP_ID) {
+    console.warn("WARNING: APP_ID is not set in .env");
 }
 
 // Token expiration times (in seconds)
@@ -21,6 +21,7 @@ const TOKEN_EXPIRY_SECONDS = 3600; // 1 hour
 
 // Helper to generate dedicated RTM token for client login
 function buildRtmToken(userId) {
+    if (!APP_CERTIFICATE) return "";
     const currentTimestamp = Math.floor(Date.now() / 1000);
     const privilegeExpiredTs = currentTimestamp + TOKEN_EXPIRY_SECONDS;
     return RtmTokenBuilder.buildToken(
@@ -33,6 +34,10 @@ function buildRtmToken(userId) {
 
 // Helper to generate composite AccessToken2 (007) with both RTC and RTM privileges
 function buildDualToken(channelName, uid) {
+    if (!APP_CERTIFICATE) {
+        return { rtcToken: "", rtmToken: "", privilegeExpiredTs: 0 };
+    }
+
     const currentTimestamp = Math.floor(Date.now() / 1000);
     const privilegeExpiredTs = currentTimestamp + TOKEN_EXPIRY_SECONDS;
 

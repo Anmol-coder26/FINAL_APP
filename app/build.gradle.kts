@@ -28,7 +28,7 @@ android {
         val geminiKey = localProperties.getProperty("GEMINI_API_KEY") ?: ""
         buildConfigField("String", "GEMINI_API_KEY", "\"$geminiKey\"")
 
-        val agoraAppId = localProperties.getProperty("AGORA_APP_ID") ?: ""
+        val agoraAppId = localProperties.getProperty("AGORA_APP_ID")?.ifBlank { "d575bd8b35004ad896366419f3a8a8f1" } ?: "d575bd8b35004ad896366419f3a8a8f1"
         buildConfigField("String", "AGORA_APP_ID", "\"$agoraAppId\"")
 
         val agoraAppCert = localProperties.getProperty("AGORA_APP_CERTIFICATE") ?: ""

@@ -1,3 +1,6 @@
+const express = require('express');
+const router = express.Router();
+
 // In-memory family token registry
 const familyTokens = new Set();
 
@@ -41,4 +44,3 @@ router.post('/trusted-contact', async (req, res) => {
 });
 
 module.exports = router;
-
