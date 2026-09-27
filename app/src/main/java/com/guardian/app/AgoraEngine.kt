@@ -94,32 +94,45 @@ class AgoraEngine(
         initRtcEngine()
     }
 
-    private fun initRtcEngine() {
+    private fun initRtcEngine(): RtcEngine? {
+        if (rtcEngine != null) return rtcEngine
         val appId = BuildConfig.AGORA_APP_ID.ifBlank { "d575bd8b35004ad896366419f3a8a8f1" }
         if (appId.isBlank()) {
             Log.e("GuardianAgora", "AGORA_APP_ID is not configured in BuildConfig")
-            return
+            return null
         }
 
         try {
-            val config = RtcEngineConfig().apply {
-                mContext = context.applicationContext
-                mAppId = appId
-                mEventHandler = rtcEventHandler
-                mChannelProfile = Constants.CHANNEL_PROFILE_COMMUNICATION
+            val engine = try {
+                RtcEngine.create(context.applicationContext, appId, rtcEventHandler)
+            } catch (e: Exception) {
+                Log.w("GuardianAgora", "Classic RtcEngine.create failed, trying RtcEngineConfig: ${e.message}")
+                val config = RtcEngineConfig().apply {
+                    mContext = context.applicationContext
+                    mAppId = appId
+                    mEventHandler = rtcEventHandler
+                    mChannelProfile = Constants.CHANNEL_PROFILE_COMMUNICATION
+                }
+                RtcEngine.create(config)
             }
-            rtcEngine = RtcEngine.create(config).apply {
-                enableAudio()
-                enableAudioVolumeIndication(200, 3, true)
-                setAudioProfile(Constants.AUDIO_PROFILE_SPEECH_STANDARD)
+
+            if (engine != null) {
+                engine.setChannelProfile(Constants.CHANNEL_PROFILE_COMMUNICATION)
+                engine.enableAudio()
+                engine.enableAudioVolumeIndication(200, 3, true)
+                engine.setAudioProfile(Constants.AUDIO_PROFILE_SPEECH_STANDARD)
+                rtcEngine = engine
+                Log.d("GuardianAgora", "Agora RtcEngine initialized successfully with App ID: ${appId.take(4)}...${appId.takeLast(4)}")
+            } else {
+                Log.e("GuardianAgora", "RtcEngine.create returned null!")
             }
-            Log.d("GuardianAgora", "Agora RtcEngine initialized successfully.")
         } catch (e: Exception) {
-            Log.e("GuardianAgora", "Failed to initialize Agora RtcEngine: ${e.message}")
+            Log.e("GuardianAgora", "Failed to initialize Agora RtcEngine: ${e.message}", e)
         }
+        return rtcEngine
     }
 
-    fun getRtcEngine(): RtcEngine? = rtcEngine
+    fun getRtcEngine(): RtcEngine? = rtcEngine ?: initRtcEngine()
 
     fun startCall(
         channelName: String = "guardian_secure_call",
@@ -131,26 +144,22 @@ class AgoraEngine(
         this.localUid = uid
 
         _callState.value = AgoraCallState.CONNECTING
-        listener.onCallStateChanged(AgoraCallState.CONNECTING, "Fetching security tokens...")
+        listener.onCallStateChanged(AgoraCallState.CONNECTING, "Connecting to secure channel...")
 
         scope.launch {
+            val engine = rtcEngine ?: initRtcEngine()
+            if (engine == null) {
+                _callState.value = AgoraCallState.ERROR
+                listener.onCallStateChanged(AgoraCallState.ERROR, "RTC Engine unavailable")
+                return@launch
+            }
+
             try {
                 val tokens = fetchRteTokens(channelName, uid)
                 activeRtcToken = tokens.optString("rtcToken", "")
                 activeRtmToken = tokens.optString("rtmToken", "")
 
                 Log.d("AgoraDebug", "Token has RTM privileges: $activeRtmToken")
-
-                val engine = rtcEngine ?: run {
-                    initRtcEngine()
-                    rtcEngine
-                }
-
-                if (engine == null) {
-                    _callState.value = AgoraCallState.ERROR
-                    listener.onCallStateChanged(AgoraCallState.ERROR, "RTC Engine unavailable")
-                    return@launch
-                }
 
                 // 1. Join RTC channel for voice audio transmission
                 engine.setClientRole(Constants.CLIENT_ROLE_BROADCASTER)
@@ -171,9 +180,18 @@ class AgoraEngine(
                 )
 
             } catch (e: Exception) {
-                Log.e("GuardianAgora", "Start call exception: ${e.message}")
-                // Fallback to local tokenless channel join if running without backend IP
-                rtcEngine?.joinChannel(null, channelName, null, uid)
+                Log.e("GuardianAgora", "Start call exception, attempting fallback join: ${e.message}")
+                try {
+                    engine.setClientRole(Constants.CLIENT_ROLE_BROADCASTER)
+                    val joinResult = engine.joinChannel(null, channelName, null, uid)
+                    if (joinResult != Constants.ERR_OK) {
+                        _callState.value = AgoraCallState.ERROR
+                        listener.onCallStateChanged(AgoraCallState.ERROR, "Join fallback failed (code: $joinResult)")
+                    }
+                } catch (fallbackErr: Exception) {
+                    _callState.value = AgoraCallState.ERROR
+                    listener.onCallStateChanged(AgoraCallState.ERROR, "RTC Engine unavailable: ${fallbackErr.message}")
+                }
             }
         }
     }
