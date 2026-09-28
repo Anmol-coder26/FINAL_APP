@@ -200,6 +200,36 @@ fun VoipCallScreen(
                 }
             }
 
+            // Role Confidence Banner
+            if (state.roleConfidence > 0f && (state.scammerRole != "Unknown" || state.victimRole != "Unknown")) {
+                val scammerText = if (state.scammerRole != "Unknown") state.scammerRole else "Caller"
+                val confidencePct = (state.roleConfidence * 100).toInt()
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 4.dp),
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFF1E1B4B)),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Column(modifier = Modifier.padding(10.dp)) {
+                        Text(
+                            text = "Detected: $scammerText is likely the SCAMMER ($confidencePct% confidence)",
+                            color = Color(0xFFFF4D5E),
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        if (state.roleReasoning.isNotBlank()) {
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(
+                                text = "Reasoning: ${state.roleReasoning}",
+                                color = Color.White.copy(alpha = 0.8f),
+                                fontSize = 11.sp
+                            )
+                        }
+                    }
+                }
+            }
+
             // 3. Dual Transcript: LazyColumn
             Box(
                 modifier = Modifier
@@ -226,6 +256,20 @@ fun VoipCallScreen(
                     ) {
                         items(state.transcripts) { line ->
                             val isLocal = line.speaker == Speaker.LOCAL
+                            val roleLabel = when {
+                                isLocal && state.victimRole == "You" -> "Victim"
+                                isLocal && state.scammerRole == "You" -> "Scammer"
+                                !isLocal && state.victimRole == "Caller" -> "Victim"
+                                !isLocal && state.scammerRole == "Caller" -> "Scammer"
+                                else -> if (isLocal) "You" else "Caller"
+                            }
+
+                            val roleColor = when (roleLabel) {
+                                "Scammer" -> Color(0xFFFF4D5E)
+                                "Victim" -> Color(0xFF00E5A0)
+                                else -> if (isLocal) Color(0xFF38BDF8) else Color(0xFFF97316)
+                            }
+
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = if (isLocal) Arrangement.Start else Arrangement.End
@@ -244,10 +288,10 @@ fun VoipCallScreen(
                                 ) {
                                     Column(modifier = Modifier.padding(10.dp)) {
                                         Text(
-                                            text = if (isLocal) "You (Local)" else "Caller (Remote)",
-                                            fontSize = 11.sp,
+                                            text = "$roleLabel:",
+                                            fontSize = 12.sp,
                                             fontWeight = FontWeight.Bold,
-                                            color = if (isLocal) Color(0xFF38BDF8) else Color(0xFFF97316)
+                                            color = roleColor
                                         )
                                         Spacer(modifier = Modifier.height(4.dp))
                                         Text(

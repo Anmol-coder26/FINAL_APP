@@ -7,18 +7,27 @@ import com.guardian.app.protect.RegionalScamKeywords
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
 
+data class LiveState(
+    val riskScore: Int = 0,
+    val topSignals: List<String> = emptyList(),
+    val victimRole: String = "Unknown",
+    val scammerRole: String = "Unknown",
+    val roleConfidence: Float = 0f,
+    val roleReasoning: String = ""
+)
+
 class LiveRiskAnalyzer(
     private val analyzer: SemanticAnalyzer,
     private val language: String = "hi",
-    private val onReport: (RiskReport) -> Unit
+    private val onState: (LiveState) -> Unit
 ) {
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private val buffer = StringBuilder()
     private var lastCallTs = 0L
     private val intervalMs = 2000L
     private var currentScore = 0
+    private var currentState = LiveState()
 
-    // INSTANT keyword layer — triggers immediately
     private val criticalKeywords = mapOf(
         "otp" to 60, "cvv" to 60, "pin" to 55, "password" to 60,
         "kyc" to 55, "lottery" to 50, "prize" to 45, "winner" to 45,
@@ -39,15 +48,15 @@ class LiveRiskAnalyzer(
                 )
                 if (buffer.length > 2000) buffer.delete(0, buffer.length - 2000)
 
-                // LAYER 1 — INSTANT keyword check
+                // LAYER 1 — INSTANT keyword scoring & instant role detection
                 val lower = line.text.lowercase()
                 var instantScore = currentScore
-                var detectedKeyword = ""
-                for ((keyword, weight) in criticalKeywords) {
-                    if (lower.contains(keyword)) {
+                var detectedKw = ""
+                for ((kw, weight) in criticalKeywords) {
+                    if (lower.contains(kw)) {
                         if (weight > instantScore) {
                             instantScore = weight
-                            detectedKeyword = keyword
+                            detectedKw = kw
                         }
                     }
                 }
@@ -56,34 +65,55 @@ class LiveRiskAnalyzer(
                 for (kw in regionalMatches) {
                     if (kw.weight > instantScore) {
                         instantScore = kw.weight
-                        detectedKeyword = kw.phrase
+                        detectedKw = kw.phrase
                     }
                 }
 
                 if (instantScore > currentScore) {
                     currentScore = instantScore
-                    val instantReport = RiskReport(
+                    // Infer instant roles if high risk keyword spoken
+                    val (vRole, sRole) = if (line.speaker == Speaker.REMOTE) "You" to "Caller" else "Caller" to "You"
+                    currentState = currentState.copy(
                         riskScore = currentScore,
-                        explanationEn = "High-risk keyword '${detectedKeyword.ifBlank { "Scam indicator" }}' detected in conversation.",
-                        explanationHi = "बातचीत में उच्च जोखिम शब्द '${detectedKeyword.ifBlank { "धोखाधड़ी संकेत" }}' मिला।"
+                        victimRole = if (currentState.victimRole == "Unknown") vRole else currentState.victimRole,
+                        scammerRole = if (currentState.scammerRole == "Unknown") sRole else currentState.scammerRole,
+                        roleConfidence = maxOf(currentState.roleConfidence, 0.75f),
+                        roleReasoning = if (currentState.roleReasoning.isBlank()) "$sRole is demanding sensitive keyword '$detectedKw' while $vRole is responding." else currentState.roleReasoning,
+                        topSignals = (currentState.topSignals + "Critical keyword: $detectedKw").distinct()
                     )
-                    withContext(Dispatchers.Main) { onReport(instantReport) }
+                    try {
+                        withContext(Dispatchers.Main) { onState(currentState) }
+                    } catch (_: Throwable) {
+                        onState(currentState)
+                    }
                 }
 
-                // LAYER 2 — AI analysis (rate-limited)
+                // LAYER 2 — AI analysis + role detection every 2 seconds
                 if (line.isFinal) {
                     val now = System.currentTimeMillis()
                     if (now - lastCallTs >= intervalMs) {
                         lastCallTs = now
                         try {
-                            val r = analyzer.analyzeMultilingual(buffer.toString(), language)
-                            val blended = maxOf(r.riskScore, currentScore)
+                            val response = analyzer.analyzeChunkWithRoles(buffer.toString(), language)
+                            val blended = maxOf(response.riskScore, currentScore)
                             currentScore = blended
-                            withContext(Dispatchers.Main) {
-                                onReport(r.copy(riskScore = blended))
+                            currentState = currentState.copy(
+                                riskScore = blended,
+                                topSignals = if (response.topSignals.isNotEmpty()) response.topSignals else currentState.topSignals,
+                                victimRole = if (response.victimRole != "Unknown") response.victimRole else currentState.victimRole,
+                                scammerRole = if (response.scammerRole != "Unknown") response.scammerRole else currentState.scammerRole,
+                                roleConfidence = if (response.roleConfidence > 0f) response.roleConfidence else currentState.roleConfidence,
+                                roleReasoning = if (response.roleReasoning.isNotBlank()) response.roleReasoning else currentState.roleReasoning
+                            )
+                            try {
+                                withContext(Dispatchers.Main) { onState(currentState) }
+                            } catch (_: Throwable) {
+                                onState(currentState)
                             }
                         } catch (e: Exception) {
-                            Log.e("Guardian", "AI analysis failed", e)
+                            try {
+                                Log.e("Guardian", "AI analysis & role detection failed", e)
+                            } catch (_: Throwable) {}
                         }
                     }
                 }
@@ -98,6 +128,7 @@ class LiveRiskAnalyzer(
 
     fun reset() {
         currentScore = 0
+        currentState = LiveState()
         buffer.clear()
     }
 }

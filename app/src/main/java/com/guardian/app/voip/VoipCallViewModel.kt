@@ -34,7 +34,11 @@ data class VoipState(
     val banner: String? = null,
     val isMuted: Boolean = false,
     val isSpeakerOn: Boolean = true,
-    val isWarningActive: Boolean = false
+    val isWarningActive: Boolean = false,
+    val victimRole: String = "Unknown",
+    val scammerRole: String = "Unknown",
+    val roleConfidence: Float = 0f,
+    val roleReasoning: String = ""
 )
 
 class VoipCallViewModel(application: Application) : AndroidViewModel(application) {
@@ -143,8 +147,20 @@ class VoipCallViewModel(application: Application) : AndroidViewModel(application
                 ).also { it.register() }
             }
 
-            liveRiskAnalyzer = LiveRiskAnalyzer(analyzer, language) { report ->
-                onRiskReportUpdated(report)
+            liveRiskAnalyzer = LiveRiskAnalyzer(analyzer, language) { liveState ->
+                _state.update { current ->
+                    current.copy(
+                        report = current.report.copy(
+                            riskScore = maxOf(current.report.riskScore, liveState.riskScore),
+                            explanationEn = if (liveState.roleReasoning.isNotBlank()) liveState.roleReasoning else current.report.explanationEn
+                        ),
+                        victimRole = liveState.victimRole,
+                        scammerRole = liveState.scammerRole,
+                        roleConfidence = liveState.roleConfidence,
+                        roleReasoning = liveState.roleReasoning
+                    )
+                }
+                onRiskReportUpdated(RiskReport(riskScore = liveState.riskScore, explanationEn = liveState.roleReasoning))
             }.also {
                 dualSttController?.let { c -> it.start(c.transcripts) }
             }

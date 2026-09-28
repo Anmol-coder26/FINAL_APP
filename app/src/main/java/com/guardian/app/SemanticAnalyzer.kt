@@ -444,7 +444,7 @@ class GeminiApiClient(private val apiKey: String = "") {
 // ==========================================
 
 class SemanticAnalyzer(
-    private val context: Context,
+    private val context: Context? = null,
     apiKey: String = ""
 ) {
     private val geminiClient = GeminiApiClient(apiKey)
@@ -457,12 +457,15 @@ class SemanticAnalyzer(
         loadSystemPrompt()
         val key = BuildConfig.GEMINI_API_KEY
         val masked = if (key.isNotBlank()) "${key.take(4)}...${key.takeLast(4)}" else "[EMPTY]"
-        Log.d("GuardianAI", "SemanticAnalyzer initialized. BuildConfig.GEMINI_API_KEY = $masked")
+        try {
+            Log.d("GuardianAI", "SemanticAnalyzer initialized. BuildConfig.GEMINI_API_KEY = $masked")
+        } catch (_: Throwable) {}
     }
 
     private fun loadSystemPrompt() {
         systemPrompt = try {
-            context.assets.open("scam_analysis_prompt.txt").bufferedReader().use { it.readText() }
+            context?.assets?.open("scam_analysis_prompt.txt")?.bufferedReader()?.use { it.readText() }
+                ?: "Analyze the conversation transcript and return JSON risk assessment with engines and explanation."
         } catch (_: Exception) {
             "Analyze the conversation transcript and return JSON risk assessment with engines and explanation."
         }
@@ -470,7 +473,7 @@ class SemanticAnalyzer(
 
     fun isNetworkAvailable(): Boolean {
         return try {
-            val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager ?: return true
+            val cm = context?.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager ?: return true
             val activeNetwork = cm.activeNetwork ?: return false
             val caps = cm.getNetworkCapabilities(activeNetwork) ?: return false
             caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
@@ -605,4 +608,122 @@ class SemanticAnalyzer(
         val localizedExplanation = com.guardian.app.bhashini.BhashiniTranslateClient.translate(report.explanationEn, "en", userLang)
         return report.copy(explanationHi = localizedExplanation)
     }
+
+    suspend fun analyzeChunkWithRoles(
+        fullContext: String,
+        language: String = "hi"
+    ): RoleAnalysisResponse = withContext(Dispatchers.IO) {
+        if (fullContext.isBlank()) return@withContext RoleAnalysisResponse()
+
+        val prompt = """
+You are an expert fraud analyst. Analyze this phone conversation for scam indicators AND identify speaker roles.
+
+Live transcript (labeled by speaker):
+$fullContext
+
+Return JSON with:
+1. "risk_score": integer 0-100
+2. "top_signals": list of strings (e.g. ["Authority impersonation", "OTP extraction", "Urgency pressure"])
+3. "explanation_en": plain English explanation
+4. "explanation_hi": Hindi explanation
+5. "victim_role": "You" or "Caller" — who is being targeted
+6. "scammer_role": "You" or "Caller" — who is running the scam
+7. "role_confidence": float 0.0-1.0
+8. "role_reasoning": one sentence explaining the role assignment
+
+Base role identification on:
+- Who is making requests vs. who is being asked
+- Who is creating urgency/fear vs. who is confused/hesitant
+- Who is claiming authority vs. who is verifying
+- Sentence structure: commands, demands vs. responses
+        """.trimIndent()
+
+        val effectiveApiKey = BuildConfig.GEMINI_API_KEY
+        if (effectiveApiKey.isNotBlank() && isNetworkAvailable()) {
+            try {
+                val rawJson = geminiClient.analyzeTranscript(prompt, fullContext)
+                val json = JSONObject(rawJson)
+                val score = json.optInt("risk_score", json.optInt("riskScore", 0))
+                val topSignalsArr = json.optJSONArray("top_signals") ?: json.optJSONArray("topSignals")
+                val topSignalsList = mutableListOf<String>()
+                if (topSignalsArr != null) {
+                    for (i in 0 until topSignalsArr.length()) {
+                        topSignalsList.add(topSignalsArr.getString(i))
+                    }
+                }
+                val expEn = json.optString("explanation_en", json.optString("explanationEn", "Scam analysis complete."))
+                val expHi = json.optString("explanation_hi", json.optString("explanationHi", "विश्लेषण पूर्ण हुआ।"))
+                val victimRole = json.optString("victim_role", json.optString("victimRole", "Unknown"))
+                val scammerRole = json.optString("scammer_role", json.optString("scammerRole", "Unknown"))
+                val roleConf = json.optDouble("role_confidence", json.optDouble("roleConfidence", 0.0)).toFloat()
+                val roleReason = json.optString("role_reasoning", json.optString("roleReasoning", ""))
+
+                return@withContext RoleAnalysisResponse(
+                    riskScore = score,
+                    topSignals = topSignalsList,
+                    explanationEn = expEn,
+                    explanationHi = expHi,
+                    victimRole = victimRole,
+                    scammerRole = scammerRole,
+                    roleConfidence = roleConf,
+                    roleReasoning = roleReason
+                )
+            } catch (e: Exception) {
+                Log.e("GuardianAI", "Gemini role analysis failed: ${e.message}")
+            }
+        }
+
+        // Heuristic Fallback for Role Classification
+        val report = analyzeMultilingual(fullContext, language)
+        val (inferredVictim, inferredScammer, conf, reason) = inferRolesHeuristically(fullContext)
+        return@withContext RoleAnalysisResponse(
+            riskScore = report.riskScore,
+            topSignals = report.topSignals.map { "${it.title}: ${it.detail}" },
+            explanationEn = report.explanationEn,
+            explanationHi = report.explanationHi,
+            victimRole = inferredVictim,
+            scammerRole = inferredScammer,
+            roleConfidence = conf,
+            roleReasoning = reason
+        )
+    }
+
+    private fun inferRolesHeuristically(context: String): RoleQuadruple<String, String, Float, String> {
+        val callerLines = context.lines().filter { it.contains("Caller:", ignoreCase = true) }
+        val youLines = context.lines().filter { it.contains("You:", ignoreCase = true) }
+
+        var callerScamCount = 0
+        var youScamCount = 0
+
+        val scamKeywords = listOf("otp", "pin", "cvv", "bank", "cbi", "police", "arrest", "kyc", "password", "transfer", "urgent")
+        for (line in callerLines) {
+            for (kw in scamKeywords) {
+                if (line.lowercase().contains(kw)) callerScamCount++
+            }
+        }
+        for (line in youLines) {
+            for (kw in scamKeywords) {
+                if (line.lowercase().contains(kw)) youScamCount++
+            }
+        }
+
+        return when {
+            callerScamCount > youScamCount -> RoleQuadruple("You", "Caller", 0.85f, "Caller is demanding sensitive credentials while You are responding.")
+            youScamCount > callerScamCount -> RoleQuadruple("Caller", "You", 0.85f, "You are demanding sensitive credentials from Caller.")
+            else -> RoleQuadruple("Unknown", "Unknown", 0.0f, "Awaiting further conversation context.")
+        }
+    }
 }
+
+data class RoleAnalysisResponse(
+    val riskScore: Int = 0,
+    val topSignals: List<String> = emptyList(),
+    val explanationEn: String = "Monitoring active conversation for deceptive intent.",
+    val explanationHi: String = "धोखाधड़ी की निगरानी की जा रही है।",
+    val victimRole: String = "Unknown",
+    val scammerRole: String = "Unknown",
+    val roleConfidence: Float = 0f,
+    val roleReasoning: String = ""
+)
+
+private data class RoleQuadruple<A, B, C, D>(val first: A, val second: B, val third: C, val fourth: D)
