@@ -24,7 +24,7 @@ data class TranscriptLine(val speaker: Speaker, val text: String, val isFinal: B
 class DualSttController(
     context: Context? = null,
     private val language: String = "hi",
-    configuration: SpeechConnectionConfig = context?.let { SpeechConnectionStore.load(it) } ?: SpeechConnectionConfig(),
+    private val configuration: SpeechConnectionConfig = context?.let { SpeechConnectionStore.load(it) } ?: SpeechConnectionConfig(),
     private val onStreamState: (Speaker, SpeechStreamPhase, String?) -> Unit = { _, _, _ -> },
     private val onPcmReceived: (Speaker) -> Unit = {}
 ) {

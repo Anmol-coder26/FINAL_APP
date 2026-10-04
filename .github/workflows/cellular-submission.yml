@@ -44,6 +44,12 @@ jobs:
           if-no-files-found: error
       - name: Run all existing and new unit tests
         run: gradle :app:testDebugUnitTest -PsubmissionDemo=true --stacktrace
+      - name: Build Android streaming integration tests
+        run: gradle :app:assembleDebugAndroidTest -PsubmissionDemo=true --stacktrace
+      - name: Start labelled speech test fixture
+        run: |
+          npm install --prefix scripts/speech-fixture --no-audit --no-fund
+          node scripts/speech-fixture/server.cjs > /tmp/susagi-speech-fixture.log 2>&1 &
       - name: Check configured app build keeps original package
         run: gradle :app:processDebugMainManifest -PsubmissionDemo=false --stacktrace
       - name: Enable hardware acceleration for Android launch check
@@ -58,7 +64,9 @@ jobs:
           profile: pixel_2
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
-          script: python3 scripts/android_launch_smoke.py
+          script: |
+            python3 scripts/android_launch_smoke.py
+            gradle :app:connectedDebugAndroidTest -PsubmissionDemo=true --stacktrace
       - name: Publish a directly downloadable demo APK
         env:
           GH_TOKEN: ${{ github.token }}
@@ -77,3 +85,10 @@ jobs:
         with:
           name: transcription-test-results
           path: app/build/reports/tests/testDebugUnitTest/
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: streaming-integration-results
+          path: |
+            app/build/reports/androidTests/
+            /tmp/susagi-speech-fixture.log
