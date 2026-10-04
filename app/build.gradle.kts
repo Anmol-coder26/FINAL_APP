@@ -5,7 +5,15 @@ plugins {
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
     id("com.google.devtools.ksp")
-    id("com.google.gms.google-services")
+
+}
+
+// The downloadable demo installs beside the configured app, with its own data.
+val submissionDemo = providers.gradleProperty("submissionDemo").map { it.toBoolean() }.getOrElse(false)
+
+// Configured builds keep the existing Firebase configuration and package identity.
+if (!submissionDemo && file("google-services.json").exists()) {
+    apply(plugin = "com.google.gms.google-services")
 }
 
 val localProperties = Properties().apply {
@@ -20,11 +28,13 @@ android {
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "com.guardian.app"
+        applicationId = if (submissionDemo) "com.guardian.app.submission" else "com.guardian.app"
+        manifestPlaceholders["appLabel"] = if (submissionDemo) "SuSagi Demo" else "@string/app_name"
         minSdk = 26
         targetSdk = 35
         versionCode = 1
         versionName = "1.0.0"
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         val geminiKey = localProperties.getProperty("GEMINI_API_KEY") ?: ""
         buildConfigField("String", "GEMINI_API_KEY", "\"$geminiKey\"")
@@ -49,6 +59,8 @@ android {
 
         val bhashiniSttEndpoint = localProperties.getProperty("BHASHINI_STT_ENDPOINT") ?: ""
         buildConfigField("String", "BHASHINI_STT_ENDPOINT", "\"$bhashiniSttEndpoint\"")
+        val bhashiniAsrServiceId = localProperties.getProperty("BHASHINI_ASR_SERVICE_ID") ?: ""
+        buildConfigField("String", "BHASHINI_ASR_SERVICE_ID", "\"$bhashiniAsrServiceId\"")
 
         val bhashiniRestEndpoint = localProperties.getProperty("BHASHINI_REST_ENDPOINT") ?: ""
         buildConfigField("String", "BHASHINI_REST_ENDPOINT", "\"$bhashiniRestEndpoint\"")
@@ -65,6 +77,11 @@ android {
             isMinifyEnabled = false
             isShrinkResources = false
             signingConfig = signingConfigs.getByName("debug")
+        }
+    }
+    if (submissionDemo) {
+        System.getenv("SUSAGI_DEMO_KEYSTORE")?.takeIf { it.isNotBlank() }?.let {
+            signingConfigs.getByName("debug").storeFile = file(it)
         }
     }
 
@@ -139,6 +156,9 @@ dependencies {
 
     // OkHttp for Bhashini Streaming STT WebSocket & REST Translation/TTS
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    implementation("io.socket:socket.io-client:2.1.0") {
+        exclude(group = "org.json", module = "json")
+    }
 
     // Firebase Cloud Messaging
     implementation(platform("com.google.firebase:firebase-bom:33.7.0"))
@@ -146,5 +166,11 @@ dependencies {
 
     debugImplementation("androidx.compose.ui:ui-tooling")
     testImplementation("junit:junit:4.13.2")
+    testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.8.1")
+    testImplementation("org.mockito:mockito-core:5.12.0")
     testImplementation("org.json:json:20231013")
+    androidTestImplementation("androidx.test.ext:junit:1.2.1")
+    androidTestImplementation("androidx.test:runner:1.6.2")
+    androidTestImplementation("androidx.test:rules:1.6.1")
+    androidTestImplementation("androidx.test.uiautomator:uiautomator:2.3.0")
 }

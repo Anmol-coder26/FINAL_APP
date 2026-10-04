@@ -3,114 +3,144 @@ package com.guardian.app.bhashini
 import android.content.Context
 import android.content.Intent
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
-import android.util.Log
 
+/** One recognizer owns the microphone. Restart only after a terminal result/error. */
 class AndroidSpeechRecognizerFallback(
     private val context: Context,
     private val language: String = "hi",
-    private val onTranscript: (text: String, isFinal: Boolean) -> Unit,
-    private val onError: (String) -> Unit = {}
+    private val onTranscript: (String, Boolean) -> Unit,
+    private val onError: (String) -> Unit = {},
+    private val onStatus: (String) -> Unit = {},
+    private val onAudioLevel: (Float) -> Unit = {}
 ) {
+    private val handler = Handler(Looper.getMainLooper())
     private var recognizer: SpeechRecognizer? = null
-    private var isListening = false
+    private var running = false
+    @Volatile private var closed = false
+    private var failures = 0
+    private var quietSegments = 0
+    private val restart = Runnable { listen() }
 
     fun start() {
-        if (!SpeechRecognizer.isRecognitionAvailable(context)) {
-            Log.e("AndroidSTT", "Native SpeechRecognizer is not available on this device")
-            onError("Android SpeechRecognizer unavailable")
-            return
-        }
-
-        try {
-            recognizer = SpeechRecognizer.createSpeechRecognizer(context).apply {
-                setRecognitionListener(object : RecognitionListener {
-                    override fun onReadyForSpeech(params: Bundle?) {
-                        Log.d("AndroidSTT", "Native Android SpeechRecognizer ready (Lang: $language)")
-                    }
-
-                    override fun onBeginningOfSpeech() {}
-                    override fun onRmsChanged(rmsdB: Float) {}
-                    override fun onBufferReceived(buffer: ByteArray?) {}
-
-                    override fun onEndOfSpeech() {
-                        if (isListening) restartListening()
-                    }
-
-                    override fun onError(error: Int) {
-                        Log.w("AndroidSTT", "Native SpeechRecognizer error code: $error")
-                        // Error codes 7 (NO_MATCH) and 6 (SPEECH_TIMEOUT) are normal when quiet
-                        if (isListening) {
-                            restartListening()
-                        }
-                    }
-
-                    override fun onResults(results: Bundle?) {
-                        val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
-                        val text = matches?.firstOrNull()
-                        if (!text.isNullOrBlank()) {
-                            Log.d("AndroidSTT", "Native STT Final: $text")
-                            onTranscript(text, true)
-                        }
-                        if (isListening) restartListening()
-                    }
-
-                    override fun onPartialResults(partialResults: Bundle?) {
-                        val matches = partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
-                        val text = matches?.firstOrNull()
-                        if (!text.isNullOrBlank()) {
-                            Log.d("AndroidSTT", "Native STT Partial: $text")
-                            onTranscript(text, false)
-                        }
-                    }
-
-                    override fun onEvent(eventType: Int, params: Bundle?) {}
-                })
+        handler.post {
+            if (closed || running) return@post
+            if (!SpeechRecognizer.isRecognitionAvailable(context)) {
+                onError("No speech recognition service found. Install/enable a speech service, then retry.")
+                return@post
             }
-
-            isListening = true
-            restartListening()
-        } catch (e: Exception) {
-            Log.e("AndroidSTT", "Failed to start native SpeechRecognizer: ${e.message}")
-            onError(e.message ?: "SpeechRecognizer start error")
+            running = true
+            try {
+                recognizer = SpeechRecognizer.createSpeechRecognizer(context).apply {
+                    setRecognitionListener(object : RecognitionListener {
+                        override fun onReadyForSpeech(params: Bundle?) {
+                            if (running && quietSegments < 2) onStatus("Android speech recognition ready — speak near the microphone")
+                        }
+                        override fun onBeginningOfSpeech() {}
+                        override fun onRmsChanged(rmsdB: Float) {
+                            if (running) onAudioLevel(((rmsdB + 2f) / 12f).coerceIn(0f, 1f))
+                        }
+                        override fun onBufferReceived(buffer: ByteArray?) {}
+                        // onResults/onError must finish this segment before another startListening.
+                        override fun onEndOfSpeech() { if (running) onAudioLevel(0f) }
+                        override fun onError(error: Int) {
+                            if (!running) return
+                            onAudioLevel(0f)
+                            when (error) {
+                                SpeechRecognizer.ERROR_NO_MATCH, SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> {
+                                    quietSegments++
+                                    if (quietSegments >= 2) onStatus(
+                                        "No speech recognized. Check speaker volume. If this phone is in a SIM call, Android may block its microphone; use SuSagi on a second device."
+                                    )
+                                    schedule(500)
+                                }
+                                SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS,
+                                SpeechRecognizer.ERROR_LANGUAGE_NOT_SUPPORTED,
+                                SpeechRecognizer.ERROR_LANGUAGE_UNAVAILABLE -> fail(
+                                    "Speech recognition permission or language unavailable (code $error). Check microphone permission and language support, then retry."
+                                )
+                                else -> {
+                                    failures++
+                                    if (failures >= 4) fail(
+                                        "Speech recognition failed (code $error). Check connectivity and microphone access, then retry."
+                                    ) else {
+                                        onStatus("Speech recognition reconnecting (code $error)")
+                                        schedule(1000L * failures)
+                                    }
+                                }
+                            }
+                        }
+                        override fun onResults(results: Bundle?) {
+                            if (!running) return
+                            val text = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+                                ?.firstOrNull()?.trim().orEmpty()
+                            if (text.isNotEmpty()) {
+                                failures = 0
+                                quietSegments = 0
+                                onTranscript(text, true)
+                            }
+                            schedule(250)
+                        }
+                        override fun onPartialResults(partialResults: Bundle?) {
+                            if (!running) return
+                            val text = partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+                                ?.firstOrNull()?.trim().orEmpty()
+                            if (text.isNotEmpty()) {
+                                quietSegments = 0
+                                onTranscript(text, false)
+                            }
+                        }
+                        override fun onEvent(eventType: Int, params: Bundle?) {}
+                    })
+                }
+                listen()
+            } catch (_: Exception) {
+                fail("Could not start speech recognition. Check the device's speech service and retry.")
+            }
         }
     }
 
-    private fun restartListening() {
-        if (!isListening) return
-        try {
-            val langTag = when (language.lowercase()) {
-                "hi" -> "hi-IN"
-                "ta" -> "ta-IN"
-                "te" -> "te-IN"
-                "bn" -> "bn-IN"
-                "mr" -> "mr-IN"
-                "kn" -> "kn-IN"
-                "ml" -> "ml-IN"
-                "pa" -> "pa-IN"
-                "gu" -> "gu-IN"
-                else -> "en-IN"
-            }
-            val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-                putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-                putExtra(RecognizerIntent.EXTRA_LANGUAGE, langTag)
-                putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
-                putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
-            }
-            recognizer?.startListening(intent)
-        } catch (e: Exception) {
-            Log.e("AndroidSTT", "Restart listening failed: ${e.message}")
+    private fun schedule(delay: Long) {
+        handler.removeCallbacks(restart)
+        if (running) handler.postDelayed(restart, delay)
+    }
+
+    private fun listen() {
+        if (!running) return
+        val tag = if (language.contains('-')) language else "$language-IN"
+        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE, tag)
+            putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
+            putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
         }
+        try {
+            recognizer?.startListening(intent)
+        } catch (_: Exception) {
+            fail("Speech recognition could not access the microphone. Stop other recorders and retry.")
+        }
+    }
+
+    private fun fail(message: String) {
+        dispose()
+        onError(message)
+    }
+
+    private fun dispose() {
+        closed = true
+        running = false
+        handler.removeCallbacks(restart)
+        recognizer?.cancel()
+        recognizer?.destroy()
+        recognizer = null
     }
 
     fun stop() {
-        isListening = false
-        try {
-            recognizer?.stopListening()
-            recognizer?.destroy()
-        } catch (_: Exception) {}
-        recognizer = null
+        closed = true
+        if (Looper.myLooper() == Looper.getMainLooper()) dispose() else handler.post { dispose() }
     }
 }

@@ -18,10 +18,16 @@
     <uses-permission android:name="android.permission.CALL_PHONE" />
     <uses-permission android:name="android.permission.READ_PHONE_NUMBERS" />
 
+    <queries>
+        <intent>
+            <action android:name="android.speech.RecognitionService" />
+        </intent>
+    </queries>
+
     <application
         android:allowBackup="true"
         android:usesCleartextTraffic="true"
-        android:label="@string/app_name"
+        android:label="${appLabel}"
         android:supportsRtl="true"
         android:theme="@style/Theme.Guardian">
         <activity
@@ -37,6 +43,7 @@
             android:exported="true" />
         <activity
             android:name=".voip.VoipCallActivity"
+            android:launchMode="singleTop"
             android:exported="true" />
         <activity
             android:name=".QrScannerActivity"
@@ -106,7 +113,7 @@
 
         <service
             android:name=".voip.VoipCallService"
-            android:foregroundServiceType="microphone|phoneCall"
+            android:foregroundServiceType="microphone"
             android:exported="false" />
 
         <activity

@@ -5,7 +5,6 @@ import io.agora.rtc2.IAudioFrameObserver
 import io.agora.rtc2.RtcEngine
 import io.agora.rtc2.audio.AudioParams
 import java.nio.ByteBuffer
-import java.nio.ByteOrder
 
 class AgoraFrameBridge(
     private val rtcEngine: RtcEngine,
@@ -14,9 +13,14 @@ class AgoraFrameBridge(
 ) : IAudioFrameObserver {
 
     fun register() {
-        rtcEngine.registerAudioFrameObserver(this)
-        rtcEngine.setPlaybackAudioFrameParameters(16000, 1, Constants.RAW_AUDIO_FRAME_OP_MODE_READ_ONLY, 1600)
-        rtcEngine.setRecordingAudioFrameParameters(16000, 1, Constants.RAW_AUDIO_FRAME_OP_MODE_READ_ONLY, 1600)
+        check(rtcEngine.setRecordingAudioFrameParameters(16000, 1, Constants.RAW_AUDIO_FRAME_OP_MODE_READ_ONLY, 1600) == 0) {
+            "Agora could not configure local PCM capture"
+        }
+        // The mixed-playback setter does not configure the per-user callback.
+        check(rtcEngine.setPlaybackAudioFrameBeforeMixingParameters(16000, 1) == 0) {
+            "Agora could not configure caller PCM capture"
+        }
+        check(rtcEngine.registerAudioFrameObserver(this) == 0) { "Agora could not register PCM capture" }
     }
 
     fun unregister() {
@@ -35,7 +39,7 @@ class AgoraFrameBridge(
         avSyncType: Int
     ): Boolean {
         buffer?.let {
-            val shorts = byteBufferToShorts(it, samplesPerChannel, channels)
+            val shorts = Pcm16Frames.mono(it, samplesPerChannel, channels, bytesPerSample)
             if (shorts.isNotEmpty()) {
                 onLocalPcm(shorts, samplesPerSec)
             }
@@ -57,7 +61,7 @@ class AgoraFrameBridge(
         is_mute: Int
     ): Boolean {
         buffer?.let {
-            val shorts = byteBufferToShorts(it, samplesPerChannel, channels)
+            val shorts = Pcm16Frames.mono(it, samplesPerChannel, channels, bytesPerSample)
             if (shorts.isNotEmpty()) {
                 onRemotePcm(uid, shorts, samplesPerSec)
             }
@@ -100,23 +104,12 @@ class AgoraFrameBridge(
         avSyncType: Int
     ): Boolean = true
 
-    override fun getObservedAudioFramePosition(): Int = 0x0008 or 0x0001 // AUDIO_FRAME_POSITION_BEFORE_MIXING | AUDIO_FRAME_POSITION_RECORD (0x0009)
+    // Agora 4.4.1: RECORD=0x0002; BEFORE_MIXING=0x0008. 0x0001 is mixed playback.
+    override fun getObservedAudioFramePosition(): Int = 0x0008 or 0x0002
 
-    override fun getRecordAudioParams(): AudioParams? = null
+    override fun getRecordAudioParams(): AudioParams = AudioParams(16000, 1, Constants.RAW_AUDIO_FRAME_OP_MODE_READ_ONLY, 1600)
     override fun getPlaybackAudioParams(): AudioParams? = null
     override fun getMixedAudioParams(): AudioParams? = null
     override fun getEarMonitoringAudioParams(): AudioParams? = null
 
-    private fun byteBufferToShorts(byteBuffer: ByteBuffer, samplesPerChannel: Int, channels: Int): ShortArray {
-        val totalSamples = samplesPerChannel * channels
-        val shortArray = ShortArray(totalSamples)
-        val duplicate = byteBuffer.duplicate()
-        duplicate.order(ByteOrder.LITTLE_ENDIAN)
-        val shortBuffer = duplicate.asShortBuffer()
-        val count = minOf(shortBuffer.remaining(), totalSamples)
-        if (count > 0) {
-            shortBuffer.get(shortArray, 0, count)
-        }
-        return shortArray
-    }
 }

@@ -5,53 +5,25 @@ import android.content.Context
 import android.content.Intent
 import android.telephony.TelephonyManager
 import android.util.Log
-import androidx.core.content.ContextCompat
 
+/** A call notification invites a visible user action; it never starts microphone capture. */
 class CallStateReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
-        if (intent.action != TelephonyManager.ACTION_PHONE_STATE_CHANGED &&
-            intent.action != "android.intent.action.PHONE_STATE") {
-            return
-        }
-
-        val state = intent.getStringExtra(TelephonyManager.EXTRA_STATE)
-        Log.d("GuardianCallState", "CallStateReceiver onReceive state: $state")
-
-        when (state) {
-            TelephonyManager.EXTRA_STATE_OFFHOOK -> {
-                // Call connected / active
-                val svcIntent = Intent(context, CallProtectionService::class.java).apply {
-                    action = CallProtectionService.ACTION_CALL_CONNECTED
-                }
-                try {
-                    ContextCompat.startForegroundService(context, svcIntent)
-                } catch (e: Exception) {
-                    Log.e("GuardianCallState", "Failed to start CallProtectionService: ${e.message}")
-                }
-            }
-
-            TelephonyManager.EXTRA_STATE_RINGING -> {
-                // Incoming call ringing
-                val incomingNumber = intent.getStringExtra(TelephonyManager.EXTRA_INCOMING_NUMBER).orEmpty()
-                val svcIntent = Intent(context, CallProtectionService::class.java).apply {
-                    action = CallProtectionService.ACTION_CALL_RINGING
-                    putExtra(CallProtectionService.EXTRA_NUMBER, incomingNumber)
-                }
-                try {
-                    ContextCompat.startForegroundService(context, svcIntent)
-                } catch (e: Exception) {
-                    Log.e("GuardianCallState", "Failed to start CallProtectionService on ringing: ${e.message}")
-                }
-            }
-
-            TelephonyManager.EXTRA_STATE_IDLE -> {
-                // Call ended
-                try {
+        if (intent.action != TelephonyManager.ACTION_PHONE_STATE_CHANGED) return
+        try {
+            when (intent.getStringExtra(TelephonyManager.EXTRA_STATE)) {
+                TelephonyManager.EXTRA_STATE_OFFHOOK -> GuardianNotifications.callConnected(context)
+                TelephonyManager.EXTRA_STATE_RINGING -> GuardianNotifications.warn(
+                    context, "Incoming call to review",
+                    "Answer the call and enable speakerphone. Open SuSagi to start live transcription."
+                )
+                TelephonyManager.EXTRA_STATE_IDLE -> {
+                    GuardianNotifications.callEnded(context)
                     context.stopService(Intent(context, CallProtectionService::class.java))
-                } catch (e: Exception) {
-                    Log.e("GuardianCallState", "Failed to stop CallProtectionService: ${e.message}")
                 }
             }
+        } catch (_: SecurityException) {
+            Log.w("GuardianCallState", "Call notification permission unavailable; open Live Defense manually")
         }
     }
 }

@@ -1,0 +1,95 @@
+name: Cellular transcription submission build
+on:
+  push:
+    branches: [feat/cellular-live-transcription]
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      SUSAGI_DEMO_KEYSTORE: ${{ github.workspace }}/demo-signing.keystore
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools platforms;android-35 build-tools;34.0.0
+          log-accepted-android-sdk-licenses: false
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+          cache-read-only: false
+      - name: Keep demo update signing consistent across builds
+        uses: actions/cache@v4
+        with:
+          path: demo-signing.keystore
+          key: susagi-demo-debug-keystore-v2
+      - name: Prepare demo signing key
+        run: |
+          if [ ! -f "$SUSAGI_DEMO_KEYSTORE" ]; then
+            keytool -genkeypair -keystore "$SUSAGI_DEMO_KEYSTORE" -storepass android -keypass android -alias androiddebugkey -keyalg RSA -keysize 2048 -validity 10000 -dname 'CN=Android Debug,O=Android,C=US'
+          fi
+      - name: Build room-call and microphone-listening APK
+        run: gradle :app:assembleDebug -PsubmissionDemo=true --stacktrace
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SuSagi-Demo-separate-install
+          path: app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+      - name: Run all existing and new unit tests
+        run: gradle :app:testDebugUnitTest -PsubmissionDemo=true --stacktrace
+      - name: Build Android streaming integration tests
+        run: gradle :app:assembleDebugAndroidTest -PsubmissionDemo=true --stacktrace
+      - name: Start labelled speech test fixture
+        run: |
+          npm install --prefix scripts/speech-fixture --no-audit --no-fund
+          node scripts/speech-fixture/server.cjs > /tmp/susagi-speech-fixture.log 2>&1 &
+      - name: Check configured app build keeps original package
+        run: gradle :app:processDebugMainManifest -PsubmissionDemo=false --stacktrace
+      - name: Enable hardware acceleration for Android launch check
+        run: |
+          sudo chmod 666 /dev/kvm
+      - name: Install and launch the actual APK on Android 15
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          profile: pixel_2
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          script: |
+            python3 scripts/android_launch_smoke.py
+            bash scripts/verify_streaming_android.sh
+      - name: Publish a directly downloadable demo APK
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p dist
+          cp app/build/outputs/apk/debug/app-debug.apk dist/SuSagi-Demo.apk
+          sha256sum dist/SuSagi-Demo.apk > dist/SHA256SUMS.txt
+          gh release create "susagi-demo-${GITHUB_RUN_NUMBER}" dist/SuSagi-Demo.apk dist/SHA256SUMS.txt --prerelease --latest=false --target "$GITHUB_SHA" --title "SuSagi Demo ${GITHUB_RUN_NUMBER}" --notes-file docs/DEMO_DOWNLOAD.md
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: android-launch-check
+          path: app/build/reports/android-launch/
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: transcription-test-results
+          path: app/build/reports/tests/testDebugUnitTest/
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: streaming-integration-results
+          path: |
+            app/build/reports/androidTests/
+            app/build/reports/streaming-diagnostics/
+            /tmp/susagi-speech-fixture.log

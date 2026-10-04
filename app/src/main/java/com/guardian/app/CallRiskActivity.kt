@@ -15,6 +15,7 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -47,6 +48,7 @@ import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material.icons.filled.WarningAmber
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -108,8 +110,12 @@ class CallRiskActivity : ComponentActivity() {
 
     private var isDetecting by mutableStateOf(false)
     private var isAnalyzing by mutableStateOf(false)
-    private var isAgoraMode by mutableStateOf(false)
     private var transcript by mutableStateOf("")
+    private var listeningStatus by mutableStateOf("Ready — choose a listening mode and tap Start")
+    private var companionMode by mutableStateOf(false)
+    private var isSimulatedTranscript by mutableStateOf(false)
+    private var hasObservedActiveCall = false
+    private val liveTranscript = LiveTranscriptBuffer()
     private var riskReport by mutableStateOf(RiskReport())
     private var errorMessage by mutableStateOf<String?>(null)
     private var selectedLanguage by mutableStateOf(LanguageMode.AUTO)
@@ -117,8 +123,6 @@ class CallRiskActivity : ComponentActivity() {
     private val conversationHistory = mutableStateListOf<String>()
     private val transcriptBuffer = StringBuilder()
 
-    private var transcriber: StreamingTranscriber? = null
-    private var agoraEngine: AgoraEngine? = null
     private lateinit var semanticAnalyzer: SemanticAnalyzer
     private var analysisJob: Job? = null
     private var isDemoModePlaying by mutableStateOf(false)
@@ -134,8 +138,10 @@ class CallRiskActivity : ComponentActivity() {
     @Suppress("DEPRECATION")
     private val callEndListener = object : PhoneStateListener() {
         override fun onCallStateChanged(state: Int, phoneNumber: String?) {
-            if (state == TelephonyManager.CALL_STATE_IDLE && isDetecting) {
-                resetDemo()
+            if (state == TelephonyManager.CALL_STATE_OFFHOOK) hasObservedActiveCall = true
+            if (state == TelephonyManager.CALL_STATE_IDLE && hasObservedActiveCall) {
+                hasObservedActiveCall = false
+                if (isDetecting && !companionMode) stopDetection()
             }
         }
     }
@@ -155,7 +161,6 @@ class CallRiskActivity : ComponentActivity() {
         }
 
         semanticAnalyzer = SemanticAnalyzer(this)
-        agoraEngine = AgoraEngine(this)
         warningPlayer = com.guardian.app.callprotect.CriticalWarningPlayer(this)
 
         currentCallerNumber = intent?.getStringExtra(CallProtectionService.EXTRA_NUMBER).orEmpty()
@@ -190,29 +195,32 @@ class CallRiskActivity : ComponentActivity() {
             telephony.listen(callEndListener, PhoneStateListener.LISTEN_CALL_STATE)
         }
 
-        // Auto-start speakerphone transcription pipeline
-        requestAndStartDetection()
+        // Start from a visible user action; permission alone is not a listening session.
+        selectedLanguage = if (getSelectedLanguageFromPrefs() == "en") LanguageMode.ENGLISH else LanguageMode.HINDI
 
         setContent {
-            val agoraCallState by agoraEngine?.callState?.collectAsState() ?: remember { mutableStateOf(AgoraCallState.DISCONNECTED) }
-
             GuardianTheme {
                 CallRiskScreen(
-                    isDetecting = isDetecting || isDemoModePlaying || agoraCallState == AgoraCallState.IN_CALL || agoraCallState == AgoraCallState.CONNECTING,
+                    isDetecting = isDetecting || isDemoModePlaying,
                     isAnalyzing = isAnalyzing,
-                    isAgoraMode = isAgoraMode,
-                    agoraCallState = agoraCallState,
                     transcript = transcript,
                     conversationHistory = conversationHistory,
                     riskReport = riskReport,
                     errorMessage = errorMessage,
                     selectedLanguage = selectedLanguage,
                     audioLevel = audioLevel,
+                    listeningStatus = listeningStatus,
+                    companionMode = companionMode,
+                    onCompanionModeChange = { enabled ->
+                        stopDetection()
+                        companionMode = enabled
+                    },
                     isDemoModePlaying = isDemoModePlaying,
+                    isSimulatedTranscript = isSimulatedTranscript,
                     callerNumber = currentCallerNumber,
                     onLanguageSelect = { lang ->
                         selectedLanguage = lang
-                        transcriber?.setLanguage(lang)
+                        if (isDetecting) startDetection()
                     },
                     onStartSpeaker = ::requestAndStartDetection,
                     onStartAgoraVoip = ::startAgoraCall,
@@ -289,7 +297,7 @@ class CallRiskActivity : ComponentActivity() {
         }
 
         // 4. Trusted Contact Auto-Alert if risk >= 75
-        if (enhanced.riskScore >= 75 && !trustedAlertSentForThisCall) {
+        if (isDetecting && enhanced.riskScore >= 75 && !trustedAlertSentForThisCall) {
             trustedAlertSentForThisCall = true
             val caller = currentCallerNumber.ifBlank { "Unknown Caller" }
             val reasons: List<String> = enhanced.topSignals.map { it.title }.ifEmpty { listOf(enhanced.explanationEn) }
@@ -338,47 +346,43 @@ class CallRiskActivity : ComponentActivity() {
     }
 
     private fun startAnalysisPipeline() {
-        try {
-            val prefLang = getSelectedLanguageFromPrefs()
-            bhashiniPipeline = com.guardian.app.bhashini.GuardianAnalysisPipeline(
-                analyzer = semanticAnalyzer,
-                onRiskUpdate = { report ->
-                    lifecycleScope.launch {
-                        val enhanced = processAndEnhanceRiskReport(report, transcriptBuffer.toString())
+        val language = when (selectedLanguage) {
+            LanguageMode.HINDI -> "hi"
+            LanguageMode.ENGLISH -> "en"
+            LanguageMode.AUTO -> getSelectedLanguageFromPrefs()
+        }
+        bhashiniPipeline = com.guardian.app.bhashini.GuardianAnalysisPipeline(
+            analyzer = semanticAnalyzer,
+            context = this,
+            onTranscript = { text, isFinal ->
+                transcript = text
+                errorMessage = null
+                liveTranscript.accept(text, isFinal)
+                if (isFinal) {
+                    conversationHistory.clear()
+                    conversationHistory.addAll(liveTranscript.history)
+                    transcriptBuffer.clear()
+                    transcriptBuffer.append(liveTranscript.context)
+                }
+            },
+            onStatus = { listeningStatus = it },
+            onAudioLevel = { audioLevel = it },
+            onAnalysisState = { isAnalyzing = it },
+            onRiskUpdate = { report ->
+                analysisJob?.cancel()
+                analysisJob = lifecycleScope.launch {
+                    val enhanced = processAndEnhanceRiskReport(report, liveTranscript.context)
+                    if (isDetecting) {
                         riskReport = enhanced
                         checkCallWarning(enhanced)
                     }
-                },
-                onError = { err ->
-                    Log.e("Guardian", "Bhashini error: $err")
-                    if (isAgoraMode) {
-                        runOnUiThread {
-                            fallbackToAgora()
-                        }
-                    }
-                },
-                onPcmChunk = { pcmChunk ->
-                    handlePcmChunk(pcmChunk)
                 }
-            )
-            bhashiniPipeline?.start(language = prefLang)
-            usingBhashini = true
-            Log.d("Guardian", "Bhashini pipeline started for lang: $prefLang")
-        } catch (e: Exception) {
-            Log.e("Guardian", "Bhashini init failed: ${e.message}", e)
-            if (isAgoraMode) {
-                fallbackToAgora()
-            }
-        }
-    }
-
-    private fun fallbackToAgora() {
-        if (usingBhashini) {
-            bhashiniPipeline?.stop()
-            bhashiniPipeline = null
-            usingBhashini = false
-        }
-        startAgoraCall()
+            },
+            onError = { errorMessage = it; listeningStatus = "Check the error below; stop and retry if needed" },
+            onPcmChunk = ::handlePcmChunk
+        )
+        usingBhashini = true
+        bhashiniPipeline?.start(language)
     }
 
     private fun getSelectedLanguageFromPrefs(): String {
@@ -390,6 +394,7 @@ class CallRiskActivity : ComponentActivity() {
         demoJob?.cancel()
         resetDemo()
         isDemoModePlaying = true
+        isSimulatedTranscript = true
 
         val scenarioTurns = when (scenarioIndex) {
             1 -> listOf(
@@ -430,8 +435,9 @@ class CallRiskActivity : ComponentActivity() {
     }
 
     private fun requestAndStartDetection() {
+        demoJob?.cancel()
+        isDemoModePlaying = false
         errorMessage = null
-        isAgoraMode = false
         if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
             microphonePermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
         } else {
@@ -440,31 +446,8 @@ class CallRiskActivity : ComponentActivity() {
     }
 
     private fun startAgoraCall() {
-        errorMessage = null
-        isAgoraMode = true
-        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
-            microphonePermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
-        } else {
-            startDetection()
-            agoraEngine?.startCall(
-                channelName = "guardian_secure_call",
-                listener = object : AgoraTranscriptListener {
-                    override fun onTranscriptReceived(text: String, isFinal: Boolean, speakerUid: Int) {
-                        handleIncomingTranscript(text, isFinal)
-                    }
-
-                    override fun onCallStateChanged(state: AgoraCallState, message: String) {
-                        if (state == AgoraCallState.ERROR) {
-                            errorMessage = message
-                        }
-                    }
-
-                    override fun onAudioVolumeChanged(volume: Int) {
-                        audioLevel = (volume / 255f).coerceIn(0f, 1f)
-                    }
-                }
-            )
-        }
+        stopDetection()
+        startActivity(android.content.Intent(this, com.guardian.app.voip.VoipCallActivity::class.java))
     }
 
     private fun startDetection() {
@@ -474,62 +457,21 @@ class CallRiskActivity : ComponentActivity() {
         conversationHistory.clear()
         riskReport = RiskReport()
         errorMessage = null
+        liveTranscript.clear()
+        isSimulatedTranscript = false
+        semanticAnalyzer.reset()
+        listeningStatus = "Starting live speech recognition…"
         isDetecting = true
         trustedAlertSentForThisCall = false
         synchronized(pcmBuffer) { pcmBuffer.clear() }
 
-        transcriber = AndroidSpeechTranscriber(this).also { speech ->
-            speech.start(selectedLanguage, object : TranscriptListener {
-                override fun onTranscript(text: String, isFinal: Boolean) {
-                    handleIncomingTranscript(text, isFinal)
-                }
-
-                override fun onRmsChanged(rmsdB: Float) {
-                    if (!isAgoraMode) {
-                        audioLevel = ((rmsdB + 2f) / 12f).coerceIn(0f, 1f)
-                    }
-                }
-
-                override fun onTranscriptionError(message: String) {
-                    if (!isAgoraMode) {
-                        errorMessage = message
-                    }
-                }
-            })
-        }
-    }
-
-    private fun handleIncomingTranscript(text: String, isFinal: Boolean) {
-        Log.i("Guardian", "Transcript received: '$text' (isFinal=$isFinal)")
-        transcript = text
-        if (isFinal && text.isNotBlank()) {
-            conversationHistory.add(0, text)
-            transcriptBuffer.append(" ").append(text)
-            if (transcriptBuffer.length > 800) {
-                transcriptBuffer.delete(0, transcriptBuffer.length - 800)
-            }
-        }
-
-        val fullContext = if (transcriptBuffer.isNotEmpty()) {
-            "$transcriptBuffer $text".trim()
-        } else {
-            text
-        }
-
-        analysisJob?.cancel()
-        analysisJob = lifecycleScope.launch {
-            isAnalyzing = true
-            val raw = semanticAnalyzer.analyzeChunk(fullContext)
-            val enhanced = processAndEnhanceRiskReport(raw, fullContext)
-            riskReport = enhanced
-            Log.i("Guardian", "Risk score: ${enhanced.riskScore} (level=${enhanced.status.label}) signals=${enhanced.topSignals.map { it.title }}")
-            isAnalyzing = false
-            checkCallWarning(riskReport)
-        }
+        startAnalysisPipeline()
     }
 
     private fun stopDetection() {
-        if (isDetecting || conversationHistory.isNotEmpty()) {
+        demoJob?.cancel()
+        isDemoModePlaying = false
+        if (isDetecting && transcriptBuffer.isNotBlank()) {
             val finalScore = riskReport.riskScore
             val signals = riskReport.topSignals.joinToString(", ")
             val summary = transcriptBuffer.toString().trim().take(300)
@@ -555,19 +497,20 @@ class CallRiskActivity : ComponentActivity() {
             usingBhashini = false
         }
 
-        transcriber?.stop()
-        transcriber = null
-        agoraEngine?.leaveCall()
         analysisJob?.cancel()
         analysisJob = null
         isDetecting = false
         isAnalyzing = false
-        isAgoraMode = false
+        listeningStatus = "Listening stopped — tap Start to resume"
         audioLevel = 0f
     }
 
     private fun resetDemo() {
+        isSimulatedTranscript = false
+        demoJob?.cancel()
+        isDemoModePlaying = false
         stopDetection()
+        liveTranscript.clear()
         transcript = ""
         transcriptBuffer.clear()
         conversationHistory.clear()
@@ -579,6 +522,8 @@ class CallRiskActivity : ComponentActivity() {
     }
 
     private fun simulateScenario(sampleText: String) {
+        resetDemo()
+        isSimulatedTranscript = true
         Log.i("Guardian", "Simulating scenario speech: '$sampleText'")
         Log.i("Guardian", "Transcript received: '$sampleText' (isFinal=true)")
         transcript = sampleText
@@ -595,12 +540,18 @@ class CallRiskActivity : ComponentActivity() {
         }
     }
 
+    override fun onPause() {
+        // This listening mode intentionally requires the visible screen.
+        if (isDetecting || isDemoModePlaying) stopDetection()
+        super.onPause()
+    }
+
     override fun onDestroy() {
+        demoJob?.cancel()
         @Suppress("DEPRECATION")
         getSystemService(TelephonyManager::class.java)?.listen(callEndListener, PhoneStateListener.LISTEN_NONE)
         stopDetection()
         warningPlayer?.release()
-        agoraEngine?.destroy()
         super.onDestroy()
     }
 }
@@ -610,15 +561,17 @@ class CallRiskActivity : ComponentActivity() {
 private fun CallRiskScreen(
     isDetecting: Boolean,
     isAnalyzing: Boolean,
-    isAgoraMode: Boolean,
-    agoraCallState: AgoraCallState,
     transcript: String,
     conversationHistory: List<String>,
     riskReport: RiskReport,
     errorMessage: String?,
     selectedLanguage: LanguageMode,
     audioLevel: Float,
+    listeningStatus: String,
+    companionMode: Boolean,
+    onCompanionModeChange: (Boolean) -> Unit,
     isDemoModePlaying: Boolean = false,
+    isSimulatedTranscript: Boolean = false,
     callerNumber: String = "",
     onLanguageSelect: (LanguageMode) -> Unit,
     onStartSpeaker: () -> Unit,
@@ -633,7 +586,8 @@ private fun CallRiskScreen(
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
-            .background(GxVoid),
+            .background(GxVoid)
+            .safeDrawingPadding(),
         contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
@@ -655,7 +609,7 @@ private fun CallRiskScreen(
                         ) {
                             GxLiveDot(pulsing = isDetecting, color = if (isDetecting) GxSafe else GxTextLo)
                             Text(
-                                if (isDetecting) "MONITORING ACTIVE" else "MONITORING STANDBY",
+                                if (isDetecting) "LISTENING SESSION" else "READY TO LISTEN",
                                 style = GxType.caption,
                                 color = if (isDetecting) GxSafe else GxTextLo,
                                 letterSpacing = 1.sp
@@ -663,7 +617,7 @@ private fun CallRiskScreen(
                         }
 
                         GxChip(
-                            text = if (isAgoraMode) "⚡ AGORA RTC" else "🎙️ BHASHINI DUAL-AI",
+                            text = "🎙️ SPEAKERPHONE ASSIST",
                             variant = GxChipVariant.Brand
                         )
                     }
@@ -671,7 +625,7 @@ private fun CallRiskScreen(
                     Spacer(modifier = Modifier.height(8.dp))
 
                     Text(
-                        text = callerNumber.ifBlank { "Unknown Caller" },
+                        text = callerNumber.ifBlank { if (companionMode) "Call on another device" else "Live call transcription" },
                         style = GxType.headline,
                         color = GxTextHi
                     )
@@ -679,12 +633,90 @@ private fun CallRiskScreen(
                     Spacer(modifier = Modifier.height(4.dp))
 
                     Text(
-                        text = if (isDetecting) {
-                            if (isAgoraMode) "Agora voice stream active • Acoustic audio: ${(audioLevel * 100).toInt()}%"
-                            else "Acoustic listener active • Voice activity: ${(audioLevel * 100).toInt()}%"
-                        } else "Hold phone on speaker or initiate secured VoIP channel",
+                        text = if (isSimulatedTranscript) "SIMULATED SCENARIO — this text is not captured from a call"
+                            else listeningStatus,
                         style = GxType.body,
                         color = GxTextMid
+                    )
+                    if (isDetecting) {
+                        Spacer(Modifier.height(10.dp))
+                        GxButton.Danger("Stop live listening", onStop, modifier = Modifier.fillMaxWidth())
+                    }
+                }
+            }
+        }
+
+        // Live Utterance Transcript Feed
+        if (isDetecting || transcript.isNotBlank() || conversationHistory.isNotEmpty()) item {
+            GxCard(
+                modifier = Modifier.fillMaxWidth(),
+                backgroundColor = GxSurface
+            ) {
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text(
+                        "LIVE UTTERANCE STREAM",
+                        style = GxType.caption,
+                        color = GxTextLo,
+                        letterSpacing = 1.sp
+                    )
+
+                    Surface(
+                        color = GxSurfaceAlt,
+                        shape = GxShapeSm,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            text = if (transcript.isNotBlank()) "\"$transcript\"" else "Awaiting live acoustic speech...",
+                            style = GxType.mono,
+                            color = if (transcript.isNotBlank()) GxPrimary else GxTextLo,
+                            modifier = Modifier.padding(12.dp)
+                        )
+                    }
+
+                    if (conversationHistory.isNotEmpty()) {
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            "CONVERSATION LOG:",
+                            style = GxType.caption,
+                            color = GxTextLo
+                        )
+                        conversationHistory.take(4).forEach { phrase ->
+                            Text(
+                                "• $phrase",
+                                style = GxType.caption,
+                                color = GxTextMid
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        item {
+            GxCard(modifier = Modifier.fillMaxWidth(), backgroundColor = GxSurface) {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Listen to a speakerphone call", style = GxType.title, color = GxTextHi)
+                    Text(
+                        "Turn on speakerphone in the phone's call screen. Keep SuSagi visible and avoid headphones. Audio is sent to the selected speech provider; tell participants before starting. This is one microphone stream; speakers are not separated.",
+                        style = GxType.body, color = GxTextMid
+                    )
+                    GxButton.Ghost(
+                        text = if (companionMode) "Mode: call on another device" else "Mode: call on this phone",
+                        onClick = { onCompanionModeChange(!companionMode) },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Text(
+                        if (companionMode) "Place this listening device beside the phone carrying the speakerphone call. Tap Stop when the call ends."
+                        else "Android may silence the microphone during a SIM call. If no words appear, switch to call on another device and run SuSagi there.",
+                        style = GxType.body, color = GxWarning
+                    )
+                    Text("Microphone activity: ${(audioLevel * 100).toInt()}%", style = GxType.caption, color = GxTextMid)
+                    LinearProgressIndicator(progress = { audioLevel }, modifier = Modifier.fillMaxWidth())
+                    if (errorMessage != null) Text(errorMessage, style = GxType.body, color = GxDanger)
+                    if (isDetecting) GxButton.Danger(
+                        text = "Stop live listening", onClick = onStop, modifier = Modifier.fillMaxWidth()
+                    ) else GxButton.Primary(
+                        text = "Start live transcription", onClick = onStartSpeaker, modifier = Modifier.fillMaxWidth()
                     )
                 }
             }
@@ -698,7 +730,7 @@ private fun CallRiskScreen(
             ) {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(
-                        "ASR DIALECT RECOGNITION",
+                        "TRANSCRIPTION LANGUAGE",
                         style = GxType.caption,
                         color = GxTextLo,
                         letterSpacing = 1.sp
@@ -766,81 +798,11 @@ private fun CallRiskScreen(
             }
         }
 
-        // Action Buttons (VoIP & Speakerphone)
         item {
-            if (isDetecting) {
-                GxButton.Danger(
-                    text = if (isAgoraMode) "End Agora VoIP Stream" else "Stop Live Listening",
-                    icon = Icons.Default.CallEnd,
-                    modifier = Modifier.fillMaxWidth(),
-                    onClick = onStop
-                )
-            } else {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    GxButton.Primary(
-                        text = "Agora VoIP",
-                        icon = Icons.Default.HeadsetMic,
-                        modifier = Modifier.weight(1f),
-                        onClick = onStartAgoraVoip
-                    )
-
-                    GxButton.Ghost(
-                        text = "Speakerphone",
-                        icon = Icons.Default.Mic,
-                        modifier = Modifier.weight(1f),
-                        onClick = onStartSpeaker
-                    )
-                }
-            }
-        }
-
-        // Live Utterance Transcript Feed
-        item {
-            GxCard(
-                modifier = Modifier.fillMaxWidth(),
-                backgroundColor = GxSurface
-            ) {
-                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text(
-                        "LIVE UTTERANCE STREAM",
-                        style = GxType.caption,
-                        color = GxTextLo,
-                        letterSpacing = 1.sp
-                    )
-
-                    Surface(
-                        color = GxSurfaceAlt,
-                        shape = GxShapeSm,
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Text(
-                            text = if (transcript.isNotBlank()) "\"$transcript\"" else "Awaiting live acoustic speech...",
-                            style = GxType.mono,
-                            color = if (transcript.isNotBlank()) GxPrimary else GxTextLo,
-                            modifier = Modifier.padding(12.dp)
-                        )
-                    }
-
-                    if (conversationHistory.isNotEmpty()) {
-                        Spacer(Modifier.height(4.dp))
-                        Text(
-                            "CONVERSATION LOG:",
-                            style = GxType.caption,
-                            color = GxTextLo
-                        )
-                        conversationHistory.take(4).forEach { phrase ->
-                            Text(
-                                "• $phrase",
-                                style = GxType.caption,
-                                color = GxTextMid
-                            )
-                        }
-                    }
-                }
-            }
+            GxButton.Ghost(
+                text = "Open SuSagi VoIP calling", onClick = onStartAgoraVoip,
+                modifier = Modifier.fillMaxWidth()
+            )
         }
 
         // Stage Demo Simulation Triggers
