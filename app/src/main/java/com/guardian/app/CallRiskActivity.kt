@@ -15,6 +15,7 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -585,7 +586,8 @@ private fun CallRiskScreen(
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
-            .background(GxVoid),
+            .background(GxVoid)
+            .safeDrawingPadding(),
         contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
@@ -636,6 +638,56 @@ private fun CallRiskScreen(
                         style = GxType.body,
                         color = GxTextMid
                     )
+                    if (isDetecting) {
+                        Spacer(Modifier.height(10.dp))
+                        GxButton.Danger("Stop live listening", onStop, modifier = Modifier.fillMaxWidth())
+                    }
+                }
+            }
+        }
+
+        // Live Utterance Transcript Feed
+        if (isDetecting || transcript.isNotBlank() || conversationHistory.isNotEmpty()) item {
+            GxCard(
+                modifier = Modifier.fillMaxWidth(),
+                backgroundColor = GxSurface
+            ) {
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text(
+                        "LIVE UTTERANCE STREAM",
+                        style = GxType.caption,
+                        color = GxTextLo,
+                        letterSpacing = 1.sp
+                    )
+
+                    Surface(
+                        color = GxSurfaceAlt,
+                        shape = GxShapeSm,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            text = if (transcript.isNotBlank()) "\"$transcript\"" else "Awaiting live acoustic speech...",
+                            style = GxType.mono,
+                            color = if (transcript.isNotBlank()) GxPrimary else GxTextLo,
+                            modifier = Modifier.padding(12.dp)
+                        )
+                    }
+
+                    if (conversationHistory.isNotEmpty()) {
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            "CONVERSATION LOG:",
+                            style = GxType.caption,
+                            color = GxTextLo
+                        )
+                        conversationHistory.take(4).forEach { phrase ->
+                            Text(
+                                "• $phrase",
+                                style = GxType.caption,
+                                color = GxTextMid
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -693,52 +745,6 @@ private fun CallRiskScreen(
                                 text = lang.label,
                                 variant = if (isSelected) GxChipVariant.Brand else GxChipVariant.Neutral,
                                 onClick = { onLanguageSelect(lang) }
-                            )
-                        }
-                    }
-                }
-            }
-        }
-
-        // Live Utterance Transcript Feed
-        item {
-            GxCard(
-                modifier = Modifier.fillMaxWidth(),
-                backgroundColor = GxSurface
-            ) {
-                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text(
-                        "LIVE UTTERANCE STREAM",
-                        style = GxType.caption,
-                        color = GxTextLo,
-                        letterSpacing = 1.sp
-                    )
-
-                    Surface(
-                        color = GxSurfaceAlt,
-                        shape = GxShapeSm,
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Text(
-                            text = if (transcript.isNotBlank()) "\"$transcript\"" else "Awaiting live acoustic speech...",
-                            style = GxType.mono,
-                            color = if (transcript.isNotBlank()) GxPrimary else GxTextLo,
-                            modifier = Modifier.padding(12.dp)
-                        )
-                    }
-
-                    if (conversationHistory.isNotEmpty()) {
-                        Spacer(Modifier.height(4.dp))
-                        Text(
-                            "CONVERSATION LOG:",
-                            style = GxType.caption,
-                            color = GxTextLo
-                        )
-                        conversationHistory.take(4).forEach { phrase ->
-                            Text(
-                                "• $phrase",
-                                style = GxType.caption,
-                                color = GxTextMid
                             )
                         }
                     }

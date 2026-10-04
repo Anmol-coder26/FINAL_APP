@@ -23,6 +23,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ConcurrentLinkedQueue
+import java.io.File
 
 /** Exercises the production Socket.IO clients with explicitly synthetic test responses. */
 @RunWith(AndroidJUnit4::class)
@@ -75,10 +76,18 @@ class StreamingIntegrationTest {
                 device.findObject(By.text("Start live transcription")).click()
                 assertTrue("No synthetic fixture transcript reached the UI from recorded PCM",
                     device.wait(Until.hasObject(By.textContains("MICROPHONE TEST FIXTURE completed")), 15_000))
+                diagnostics(device, "microphone-transcript-visible")
                 assertTrue(device.wait(Until.hasObject(By.text("Stop live listening")), 5_000))
                 device.findObject(By.text("Stop live listening")).click()
                 assertTrue(device.wait(Until.hasObject(By.text("Start live transcription")), 5_000))
             }
-        } finally { SpeechConnectionStore.save(context, original) }
+        } finally { diagnostics(device, "microphone-test-end"); SpeechConnectionStore.save(context, original) }
+    }
+
+    private fun diagnostics(device: UiDevice, name: String) {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val folder = File(context.getExternalFilesDir(null), "streaming-diagnostics").apply { mkdirs() }
+        runCatching { device.dumpWindowHierarchy(File(folder, "$name.xml")) }
+        runCatching { device.takeScreenshot(File(folder, "$name.png")) }
     }
 }

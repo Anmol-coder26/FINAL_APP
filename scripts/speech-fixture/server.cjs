@@ -15,6 +15,7 @@ io.on('connection', socket => {
     }
     microphone = task.config.serviceId === 'fixture_microphone';
     started = true;
+    console.log('fixture session ready: ' + task.config.serviceId);
     socket.emit('ready');
   });
   socket.on('data', (body, options, endOfStream, endOfSession) => {
@@ -25,6 +26,7 @@ io.on('connection', socket => {
     if (answered) return;
     answered = true;
     const label = microphone ? 'MICROPHONE TEST FIXTURE' : bytes.readInt16LE(0) === 1111 ? 'LOCAL TEST FIXTURE' : 'REMOTE TEST FIXTURE';
+    console.log('received binary PCM chunk, bytes=' + bytes.length + ', response=' + label);
     const payload = text => ({ pipelineResponse: [{ taskType: 'asr', output: [{ source: text }] }] });
     socket.emit('response', payload(label + ' partial'), false);
     setTimeout(() => socket.connected && socket.emit('response', payload(label + ' completed'), true), 80);

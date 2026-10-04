@@ -31,19 +31,32 @@ A normal local build without `-PsubmissionDemo=true` retains `com.guardian.app`,
 
 The listening device needs a working Android speech recognition service (e.g. an enabled Google speech service). Provider language support, partial-result availability, network needs, and gaps between recognition sessions vary. This is near-real-time transcription, not a promise of lossless or zero-latency streaming.
 
-## BHASHINI configuration (optional for initial demonstration)
+## Room calls and BHASHINI configuration
 
-Set these entries in your ignored root `local.properties` only if you have a provisioned streaming service whose protocol matches `BhashiniSttClient`:
+Open **Secure VoIP** from Home, then **Call setup**. Save the reachable call-server address, BHASHINI Socket.IO address, inference key, and provisioned ASR service ID. Settings are encrypted on the device and can also be used by the separate demo APK. The server's `APP_ID` must match the Android build's `AGORA_APP_ID`; the certificate stays on the call server.
+
+Phone A chooses **Create room** and shares the six-digit code. Phone B enters that code and chooses **Join call**. The shared channel is `gx_<code>`. There is no automatically joined fixed room. Permission denial keeps the lobby open; failed joins show an error and allow another attempt. Cancel and End release the observer, speech sessions, collectors, foreground service, and call.
+
+Room speech comes from Agora's `RECORD` and `BEFORE_MIXING` PCM callbacks. Local and remote streams have separate BHASHINI PUSH sessions and **You** / **Caller** transcript rows. The controller never starts a second microphone recorder or native recognizer alongside Agora. These labels describe audio identity; they are not claims that a participant is a scammer.
+
+For a configured build, these entries can instead be set in ignored root `local.properties`:
 
 ```properties
-BHASHINI_STT_ENDPOINT=wss://YOUR_PROVISIONED_STREAMING_ENDPOINT
+BHASHINI_STT_ENDPOINT=https://YOUR_PROVISIONED_SOCKET_IO_SERVER
 BHASHINI_INFERENCE_API_KEY=YOUR_KEY
-BHASHINI_PIPELINE_ID=YOUR_PIPELINE_ID
+BHASHINI_ASR_SERVICE_ID=YOUR_PROVISIONED_ASR_SERVICE_ID
+BACKEND_URL=https://YOUR_CALL_SERVER
 ```
 
-The adapter sends a JSON `start` event followed by 16 kHz, mono PCM16 binary frames, and expects `transcript`/`speech_end` or ULCA-style JSON responses. A REST ASR endpoint cannot be substituted for this WebSocket contract. This branch removes the assumed public streaming URL. Missing configuration or connection failure selects Android recognition after releasing the BHASHINI recorder. Do not claim BHASHINI was used unless the device's status reports it and real recognition was verified against your provisioned service.
+The client uses Socket.IO 2.1.0 with `auth.Authorization`, emits the documented task sequence and streaming configuration, and waits for the server's **ready** event before transmitting audio. It follows the [official BHASHINI guide](https://dibd-bhashini.gitbook.io/bhashini-apis/websocket-asr-api) and its [Java client](https://github.com/bhashini-dibd/bhashini-websockets/blob/main/Java/web-socket-client/src/main/java/client/web_socket_client/ULCASocketClient.java). Agora/microphone capture is mono PCM16 at 16 kHz; the adapter resamples to the documented 8 kHz format and sends 100 ms binary chunks in the Socket.IO `data` event. A one-second response frequency is requested; real provider latency has not been measured.
 
-For online reasoning configure `GEMINI_API_KEY` separately. The repository's existing analyzer has a local fallback; this branch does not change its scoring policy. Do not publish `local.properties` or credentials. For distribution beyond a controlled prototype, move provider credentials into an authenticated backend.
+Socket connection, task readiness, and received PCM are distinct states. The room screen displays them separately. A connected socket alone does not claim successful recognition. Parsed interim text evolves in one row per speaker; a final replaces that row and preserves bounded conversation history. Unknown final flags remain interim. Real service responses must be checked against the provisioned service before submission.
+
+In the standalone speakerphone listening mode, missing configuration or connection failure selects Android recognition after releasing the BHASHINI recorder. Room calls report BHASHINI failure without opening a competing native recognizer. Do not claim real BHASHINI transcription or a working two-device call solely from compilation or synthetic integration tests.
+
+For online reasoning configure `GEMINI_API_KEY` separately. The existing analyzer has a local fallback. Keyword checks run immediately, while semantic requests run away from transcript collection so a slow request does not block live text. Cloud semantic analysis and family-alert delivery still require real service configuration and verification. Do not publish `local.properties` or credentials.
+
+CI uses an explicitly labelled Socket.IO **test fixture** to exercise both PUSH sessions and the standalone microphone-to-screen path on Android. Its `TEST FIXTURE` responses are synthetic; they verify binary transport, session readiness, speaker mapping, partial/final updates, and cleanup rather than ASR accuracy. The fixture is excluded from the distributed application and is not a fallback speech provider.
 
 ## Live call demonstration
 
