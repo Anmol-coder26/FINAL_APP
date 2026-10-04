@@ -58,6 +58,8 @@ android {
 
         val bhashiniSttEndpoint = localProperties.getProperty("BHASHINI_STT_ENDPOINT") ?: ""
         buildConfigField("String", "BHASHINI_STT_ENDPOINT", "\"$bhashiniSttEndpoint\"")
+        val bhashiniAsrServiceId = localProperties.getProperty("BHASHINI_ASR_SERVICE_ID") ?: ""
+        buildConfigField("String", "BHASHINI_ASR_SERVICE_ID", "\"$bhashiniAsrServiceId\"")
 
         val bhashiniRestEndpoint = localProperties.getProperty("BHASHINI_REST_ENDPOINT") ?: ""
         buildConfigField("String", "BHASHINI_REST_ENDPOINT", "\"$bhashiniRestEndpoint\"")
@@ -74,6 +76,11 @@ android {
             isMinifyEnabled = false
             isShrinkResources = false
             signingConfig = signingConfigs.getByName("debug")
+        }
+    }
+    if (submissionDemo) {
+        System.getenv("SUSAGI_DEMO_KEYSTORE")?.takeIf { it.isNotBlank() }?.let {
+            signingConfigs.getByName("debug").storeFile = file(it)
         }
     }
 
@@ -148,6 +155,9 @@ dependencies {
 
     // OkHttp for Bhashini Streaming STT WebSocket & REST Translation/TTS
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    implementation("io.socket:socket.io-client:2.1.0") {
+        exclude(group = "org.json", module = "json")
+    }
 
     // Firebase Cloud Messaging
     implementation(platform("com.google.firebase:firebase-bom:33.7.0"))

@@ -24,9 +24,11 @@ class VoipPipelineTest {
         Dispatchers.setMain(UnconfinedTestDispatcher())
         val flow = MutableSharedFlow<TranscriptLine>(extraBufferCapacity = 16)
         val result = CompletableDeferred<RiskReport>()
-        // Interim keyword scoring must not invoke the network-backed semantic analyzer.
+        // A stalled semantic request must not delay interim keyword scoring.
         val analyzer = mock(SemanticAnalyzer::class.java)
-        val liveRiskAnalyzer = LiveRiskAnalyzer(analyzer, language) { result.complete(it) }
+        val liveRiskAnalyzer = LiveRiskAnalyzer(analyzer, language, semanticAnalysis = { _, _ ->
+            CompletableDeferred<RiskReport>().await()
+        }) { result.complete(it) }
         try {
             liveRiskAnalyzer.start(flow)
             withTimeout(5000) {

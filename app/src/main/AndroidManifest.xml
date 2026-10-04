@@ -43,6 +43,7 @@
             android:exported="true" />
         <activity
             android:name=".voip.VoipCallActivity"
+            android:launchMode="singleTop"
             android:exported="true" />
         <activity
             android:name=".QrScannerActivity"
@@ -112,7 +113,7 @@
 
         <service
             android:name=".voip.VoipCallService"
-            android:foregroundServiceType="microphone|phoneCall"
+            android:foregroundServiceType="microphone"
             android:exported="false" />
 
         <activity

@@ -45,7 +45,10 @@ class GuardianAnalysisPipeline(
         sourceLanguage = language
         transcriptBuffer.clear()
 
-        sttClient = BhashiniSttClient(
+        scope.launch {
+        val config = context?.let { SpeechConnectionStore.load(it) } ?: SpeechConnectionConfig()
+        if (stopped) return@launch
+        val client = BhashiniSttClient(
             sourceLanguage = language,
             mode = BhashiniSttClient.Mode.MICROPHONE,
             onTranscript = { text, isFinal ->
@@ -64,17 +67,21 @@ class GuardianAnalysisPipeline(
             },
             onPcmChunk = onPcmChunk,
             onStatus = { status -> mainHandler.post { if (!stopped) onStatus(status) } },
-            onAudioLevel = { level -> mainHandler.post { if (!stopped) onAudioLevel(level) } }
+            onAudioLevel = { level -> mainHandler.post { if (!stopped) onAudioLevel(level) } },
+            configuration = config
         )
+        sttClient = client
 
         try {
-            sttClient?.start(language)
+            if (stopped) client.stop() else client.start(language)
+            if (stopped) client.stop()
             Log.d(TAG, "Guardian Bhashini pipeline started with language: $language")
         } catch (e: Exception) {
             Log.e(TAG, "Failed to start Bhashini pipeline: ${e.message}. Triggering fallback.")
             sttClient?.stop()
             sttClient = null
             startNativeFallback(language)
+        }
         }
     }
 

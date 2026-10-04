@@ -52,6 +52,16 @@ def launch(activity, name, expected):
     return tree
 
 
+def tap_text(tree, text):
+    button = next(node for node in tree.iter() if node.get("text") == text)
+    x1, y1, x2, y2 = map(int, re.findall(r"\d+", button.get("bounds")))
+    adb("shell", "input", "tap", str((x1 + x2) // 2), str((y1 + y2) // 2))
+
+
+def has_text(tree, text):
+    return any(text in node.get("text", "") for node in tree.iter())
+
+
 try:
     adb("install", "-r", "app/build/outputs/apk/debug/app-debug.apk")
     adb("shell", "input", "keyevent", "82")
@@ -73,11 +83,49 @@ try:
     time.sleep(1)
     launch("com.guardian.app.CallRiskActivity", "transcription-resume", "Start live transcription")
     launch("com.guardian.app.MainActivity", "launcher-reopen", "Guardian Defense")
+    tree = launch("com.guardian.app.voip.VoipCallActivity", "room-lobby", "Create room")
+    assert has_text(tree, "6-digit room code"), "Room-code input missing"
+    tap_text(tree, "Call setup")
+    time.sleep(1)
+    tree = snapshot("room-setup")
+    assert has_text(tree, "Call server URL"), "Call-server configuration missing"
+    assert has_text(tree, "BHASHINI Socket.IO URL"), "Speech configuration missing"
+    tap_text(tree, "Cancel")
+    time.sleep(1)
+    adb("shell", "pm", "revoke", PACKAGE, "android.permission.RECORD_AUDIO")
+    tree = launch("com.guardian.app.voip.VoipCallActivity", "room-without-mic-permission", "Create room")
+    tap_text(tree, "Create room")
+    time.sleep(1)
+    tree = snapshot("room-mic-request")
+    if has_text(tree, "Don’t allow"):
+        tap_text(tree, "Don’t allow")
+    elif has_text(tree, "Don't allow"):
+        tap_text(tree, "Don't allow")
+    else:
+        adb("shell", "input", "keyevent", "4")
+    time.sleep(1)
+    tree = snapshot("room-mic-denied")
+    assert has_text(tree, "Microphone access was not granted"), "Permission denial did not stay in the room lobby"
+    adb("shell", "pm", "grant", PACKAGE, "android.permission.RECORD_AUDIO")
+    tree = launch("com.guardian.app.voip.VoipCallActivity", "room-permission-retry", "Create room")
+    tap_text(tree, "Create room")
+    time.sleep(1)
+    tree = snapshot("room-connecting")
+    # The credential-free build must either show a cancellable join or an actionable error.
+    assert has_text(tree, "Cancel call") or has_text(tree, "Could not") or has_text(tree, "unavailable"), "Room join has no visible outcome"
+    if has_text(tree, "Cancel call"):
+        tap_text(tree, "Cancel call")
+    time.sleep(7)
+    tree = snapshot("room-returned-to-lobby")
+    assert has_text(tree, "Create room"), "Leaving or failing a room did not restore the lobby"
+    assert_alive("com.guardian.app.voip.VoipCallActivity")
+    print("PASS: room lobby, setup dialog, microphone denial, retry, cancel/error cleanup", flush=True)
+    launch("com.guardian.app.MainActivity", "final-launcher-reopen", "Guardian Defense")
     time.sleep(4)
     assert_alive("com.guardian.app.MainActivity")
     crashes = adb("logcat", "-d", "-b", "crash")
     assert PACKAGE not in crashes, crashes
-    (REPORT / "result.txt").write_text("PASS: install, launch, microphone permissions, listening start, pause/resume, reopen; no app crash.\n")
+    (REPORT / "result.txt").write_text("PASS: install, launch, listening start, pause/resume, room lobby, setup, microphone denial, retry, cancel/error cleanup, reopen; no app crash. Real provider accuracy and a two-device room call require configured services.\n")
 finally:
     (REPORT / "logcat.txt").write_text(adb("logcat", "-d", check=False))
     (REPORT / "crashes.txt").write_text(adb("logcat", "-d", "-b", "crash", check=False))

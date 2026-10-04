@@ -10,13 +10,18 @@ import kotlinx.coroutines.flow.*
 class LiveRiskAnalyzer(
     private val analyzer: SemanticAnalyzer,
     private val language: String = "hi",
+    private val semanticAnalysis: suspend (String, String) -> RiskReport = { text, lang -> analyzer.analyzeMultilingual(text, lang) },
     private val onReport: (RiskReport) -> Unit
 ) {
-    private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
-    private val buffer = StringBuilder()
+    private val scope = CoroutineScope(Dispatchers.Main.immediate + SupervisorJob())
+    private val buffer = VoipTranscriptBuffer()
     private var lastCallTs = 0L
     private val intervalMs = 2000L
     private var currentScore = 0
+    private var dirty = false
+    private var analysisJob: Job? = null
+    private var collectorJob: Job? = null
+    private var timerJob: Job? = null
 
     // INSTANT keyword layer — triggers immediately
     private val criticalKeywords = mapOf(
@@ -31,63 +36,54 @@ class LiveRiskAnalyzer(
     )
 
     fun start(transcripts: SharedFlow<TranscriptLine>) {
-        scope.launch {
+        if (collectorJob != null) return
+        collectorJob = scope.launch(start = CoroutineStart.UNDISPATCHED) {
             transcripts.collect { line ->
-                buffer.append(
-                    if (line.speaker == Speaker.LOCAL) "\nYou: ${line.text}"
-                    else "\nCaller: ${line.text}"
-                )
-                if (buffer.length > 2000) buffer.delete(0, buffer.length - 2000)
-
-                // LAYER 1 — INSTANT keyword check
+                if (line.text.isBlank()) return@collect
+                buffer.accept(line)
+                dirty = true
                 val lower = line.text.lowercase()
                 var instantScore = currentScore
-                var detectedKeyword = ""
-                for ((keyword, weight) in criticalKeywords) {
-                    if (lower.contains(keyword)) {
-                        if (weight > instantScore) {
-                            instantScore = weight
-                            detectedKeyword = keyword
-                        }
-                    }
+                var keyword = ""
+                for ((phrase, weight) in criticalKeywords) {
+                    if (lower.contains(phrase) && weight > instantScore) { instantScore = weight; keyword = phrase }
                 }
-
-                val regionalMatches = RegionalScamKeywords.match(line.text, language)
-                for (kw in regionalMatches) {
-                    if (kw.weight > instantScore) {
-                        instantScore = kw.weight
-                        detectedKeyword = kw.phrase
-                    }
+                for (match in RegionalScamKeywords.match(line.text, language)) {
+                    if (match.weight > instantScore) { instantScore = match.weight; keyword = match.phrase }
                 }
-
                 if (instantScore > currentScore) {
                     currentScore = instantScore
-                    val instantReport = RiskReport(
+                    onReport(RiskReport(
                         riskScore = currentScore,
-                        explanationEn = "High-risk keyword '${detectedKeyword.ifBlank { "Scam indicator" }}' detected in conversation.",
-                        explanationHi = "बातचीत में उच्च जोखिम शब्द '${detectedKeyword.ifBlank { "धोखाधड़ी संकेत" }}' मिला।"
-                    )
-                    withContext(Dispatchers.Main) { onReport(instantReport) }
+                        explanationEn = "Potential risk signal '$keyword' detected in the conversation.",
+                        explanationHi = "बातचीत में संभावित जोखिम संकेत '$keyword' मिला।",
+                        isOffline = true, source = "local_keywords"
+                    ))
                 }
-
-                // LAYER 2 — AI analysis (rate-limited)
-                if (line.isFinal) {
-                    val now = System.currentTimeMillis()
-                    if (now - lastCallTs >= intervalMs) {
-                        lastCallTs = now
-                        try {
-                            val r = analyzer.analyzeMultilingual(buffer.toString(), language)
-                            val blended = maxOf(r.riskScore, currentScore)
-                            currentScore = blended
-                            withContext(Dispatchers.Main) {
-                                onReport(r.copy(riskScore = blended))
-                            }
-                        } catch (e: Exception) {
-                            Log.e("Guardian", "AI analysis failed", e)
-                        }
-                    }
-                }
+                // Semantic requests run independently of collection and UI text delivery.
+                scheduleAnalysis()
             }
+        }
+        timerJob = scope.launch {
+            while (isActive) { delay(250); scheduleAnalysis() }
+        }
+    }
+
+    private fun scheduleAnalysis() {
+        val now = System.currentTimeMillis()
+        if (!dirty || analysisJob?.isActive == true || now - lastCallTs < intervalMs) return
+        val snapshot = buffer.context()
+        if (snapshot.isBlank()) return
+        dirty = false
+        lastCallTs = now
+        analysisJob = scope.launch {
+            try {
+                val report = withContext(Dispatchers.IO) { semanticAnalysis(snapshot, language) }
+                ensureActive()
+                currentScore = maxOf(report.riskScore, currentScore)
+                onReport(report.copy(riskScore = currentScore))
+            } catch (e: CancellationException) { throw e }
+            catch (e: Exception) { Log.w("GuardianRisk", "Semantic analysis unavailable: ${e.javaClass.simpleName}") }
         }
     }
 
@@ -97,7 +93,9 @@ class LiveRiskAnalyzer(
     }
 
     fun reset() {
+        analysisJob?.cancel()
         currentScore = 0
+        dirty = false
         buffer.clear()
     }
 }

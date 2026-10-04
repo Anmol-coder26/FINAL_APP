@@ -12,7 +12,6 @@ import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
-import com.guardian.app.MainActivity
 
 class VoipCallService : Service() {
 
@@ -59,17 +58,17 @@ class VoipCallService : Service() {
         val notification = buildNotification(channelName)
 
         val foregroundTypes = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE or ServiceInfo.FOREGROUND_SERVICE_TYPE_PHONE_CALL
+            ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
         } else {
             0
         }
 
         ServiceCompat.startForeground(this, NOTIFICATION_ID, notification, foregroundTypes)
-        return START_STICKY
+        return START_NOT_STICKY
     }
 
     private fun buildNotification(channelName: String): Notification {
-        val tapIntent = Intent(this, MainActivity::class.java).apply {
+        val tapIntent = Intent(this, VoipCallActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_SINGLE_TOP
         }
         val pendingIntent = PendingIntent.getActivity(
@@ -80,8 +79,8 @@ class VoipCallService : Service() {
         )
 
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("Guardian Secure VoIP Call")
-            .setContentText("Active monitoring for scam tactics in channel: $channelName")
+            .setContentTitle("SuSagi call")
+            .setContentText("Call room ${channelName.removePrefix("gx_")} — tap to return")
             .setSmallIcon(android.R.drawable.ic_btn_speak_now)
             .setContentIntent(pendingIntent)
             .setOngoing(true)
@@ -96,7 +95,7 @@ class VoipCallService : Service() {
                 "Guardian VoIP Call Protection",
                 NotificationManager.IMPORTANCE_LOW
             ).apply {
-                description = "Shows status of ongoing encrypted secure VoIP calls"
+                description = "Shows the room for an ongoing SuSagi voice call"
             }
             val manager = getSystemService(NotificationManager::class.java)
             manager.createNotificationChannel(channel)
