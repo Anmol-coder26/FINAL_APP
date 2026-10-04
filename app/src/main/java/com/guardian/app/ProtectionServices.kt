@@ -55,11 +55,11 @@ internal object GuardianNotifications {
         val notification = NotificationCompat.Builder(context, channelId)
             .setSmallIcon(android.R.drawable.ic_dialog_alert)
             .setContentTitle("Call connected")
-            .setContentText("Put the call on speaker to check it with Guardian.")
+            .setContentText("Put the call on speaker, open SuSagi, and tap Start.")
             .setStyle(
                 NotificationCompat.BigTextStyle().bigText(
-                    "Put the call on speaker, then open Guardian to analyze the conversation. " +
-                        "Guardian does not record or save call audio."
+                    "Turn on speakerphone, open SuSagi and tap Start live transcription. " +
+                        "Speech is sent to the selected recognition provider. Same-phone capture may be blocked; a nearby listening device can be used."
                 )
             )
             .setContentIntent(pendingIntent)
@@ -72,6 +72,9 @@ internal object GuardianNotifications {
             .setAutoCancel(true)
             .build()
         manager.notify("call-connected".hashCode(), notification)
+    }
+    fun callEnded(context: Context) {
+        context.getSystemService(NotificationManager::class.java).cancel("call-connected".hashCode())
     }
 }
 
@@ -89,6 +92,7 @@ class CallMonitorService : Service() {
                 TelephonyManager.CALL_STATE_OFFHOOK -> {
                     GuardianNotifications.callConnected(this@CallMonitorService)
                 }
+                TelephonyManager.CALL_STATE_IDLE -> GuardianNotifications.callEnded(this@CallMonitorService)
             }
         }
     }

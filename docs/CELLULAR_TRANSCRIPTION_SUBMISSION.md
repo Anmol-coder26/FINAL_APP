@@ -45,6 +45,8 @@ For online reasoning configure `GEMINI_API_KEY` separately. The repository's exi
 
 ## Live call demonstration
 
+Incoming-call detection posts an ordinary notification. It does not start a microphone foreground service from the background, which can be rejected by newer Android versions. Tap the notification, then Start, or open Live Defense manually if notifications are disabled.
+
 1. Install SuSagi on the listening device. Enable its speech service and grant microphone permission.
 2. Open Live Defense. Select Hindi or English before starting.
 3. Make/answer a real call on the call phone and enable speakerphone. Tell participants the conversation will be transcribed by a speech provider.

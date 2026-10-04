@@ -47,6 +47,7 @@ import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material.icons.filled.WarningAmber
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -108,7 +109,6 @@ class CallRiskActivity : ComponentActivity() {
 
     private var isDetecting by mutableStateOf(false)
     private var isAnalyzing by mutableStateOf(false)
-    private var isAgoraMode by mutableStateOf(false)
     private var transcript by mutableStateOf("")
     private var listeningStatus by mutableStateOf("Ready — choose a listening mode and tap Start")
     private var companionMode by mutableStateOf(false)
@@ -138,9 +138,9 @@ class CallRiskActivity : ComponentActivity() {
     private val callEndListener = object : PhoneStateListener() {
         override fun onCallStateChanged(state: Int, phoneNumber: String?) {
             if (state == TelephonyManager.CALL_STATE_OFFHOOK) hasObservedActiveCall = true
-            if (state == TelephonyManager.CALL_STATE_IDLE && hasObservedActiveCall && isDetecting && !companionMode && !isAgoraMode) {
+            if (state == TelephonyManager.CALL_STATE_IDLE && hasObservedActiveCall) {
                 hasObservedActiveCall = false
-                stopDetection()
+                if (isDetecting && !companionMode) stopDetection()
             }
         }
     }
@@ -198,14 +198,10 @@ class CallRiskActivity : ComponentActivity() {
         selectedLanguage = if (getSelectedLanguageFromPrefs() == "en") LanguageMode.ENGLISH else LanguageMode.HINDI
 
         setContent {
-            val agoraCallState = AgoraCallState.DISCONNECTED
-
             GuardianTheme {
                 CallRiskScreen(
-                    isDetecting = isDetecting || isDemoModePlaying || agoraCallState == AgoraCallState.IN_CALL || agoraCallState == AgoraCallState.CONNECTING,
+                    isDetecting = isDetecting || isDemoModePlaying,
                     isAnalyzing = isAnalyzing,
-                    isAgoraMode = isAgoraMode,
-                    agoraCallState = agoraCallState,
                     transcript = transcript,
                     conversationHistory = conversationHistory,
                     riskReport = riskReport,
@@ -223,7 +219,7 @@ class CallRiskActivity : ComponentActivity() {
                     callerNumber = currentCallerNumber,
                     onLanguageSelect = { lang ->
                         selectedLanguage = lang
-                        if (isDetecting && !isAgoraMode) startDetection()
+                        if (isDetecting) startDetection()
                     },
                     onStartSpeaker = ::requestAndStartDetection,
                     onStartAgoraVoip = ::startAgoraCall,
@@ -441,7 +437,6 @@ class CallRiskActivity : ComponentActivity() {
         demoJob?.cancel()
         isDemoModePlaying = false
         errorMessage = null
-        isAgoraMode = false
         if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
             microphonePermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
         } else {
@@ -475,7 +470,7 @@ class CallRiskActivity : ComponentActivity() {
     private fun stopDetection() {
         demoJob?.cancel()
         isDemoModePlaying = false
-        if (isDetecting || conversationHistory.isNotEmpty()) {
+        if (isDetecting && transcriptBuffer.isNotBlank()) {
             val finalScore = riskReport.riskScore
             val signals = riskReport.topSignals.joinToString(", ")
             val summary = transcriptBuffer.toString().trim().take(300)
@@ -505,7 +500,6 @@ class CallRiskActivity : ComponentActivity() {
         analysisJob = null
         isDetecting = false
         isAnalyzing = false
-        isAgoraMode = false
         listeningStatus = "Listening stopped — tap Start to resume"
         audioLevel = 0f
     }
@@ -566,8 +560,6 @@ class CallRiskActivity : ComponentActivity() {
 private fun CallRiskScreen(
     isDetecting: Boolean,
     isAnalyzing: Boolean,
-    isAgoraMode: Boolean,
-    agoraCallState: AgoraCallState,
     transcript: String,
     conversationHistory: List<String>,
     riskReport: RiskReport,
@@ -623,7 +615,7 @@ private fun CallRiskScreen(
                         }
 
                         GxChip(
-                            text = if (isAgoraMode) "⚡ AGORA RTC" else "🎙️ SPEAKERPHONE ASSIST",
+                            text = "🎙️ SPEAKERPHONE ASSIST",
                             variant = GxChipVariant.Brand
                         )
                     }
@@ -666,6 +658,8 @@ private fun CallRiskScreen(
                         else "Android may silence the microphone during a SIM call. If no words appear, switch to call on another device and run SuSagi there.",
                         style = GxType.body, color = GxWarning
                     )
+                    Text("Microphone activity: ${(audioLevel * 100).toInt()}%", style = GxType.caption, color = GxTextMid)
+                    LinearProgressIndicator(progress = { audioLevel }, modifier = Modifier.fillMaxWidth())
                     if (errorMessage != null) Text(errorMessage, style = GxType.body, color = GxDanger)
                     if (isDetecting) GxButton.Danger(
                         text = "Stop live listening", onClick = onStop, modifier = Modifier.fillMaxWidth()
