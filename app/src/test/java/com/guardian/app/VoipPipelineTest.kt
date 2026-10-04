@@ -17,7 +17,7 @@ class VoipPipelineTest {
         val flow = MutableSharedFlow<TranscriptLine>(extraBufferCapacity = 16)
         var latestReport: RiskReport? = null
 
-        val analyzer = SemanticAnalyzer()
+        val analyzer = SemanticAnalyzer(org.mockito.Mockito.mock(android.content.Context::class.java))
         val liveRiskAnalyzer = LiveRiskAnalyzer(analyzer, "en") { report ->
             latestReport = report
         }
@@ -30,7 +30,7 @@ class VoipPipelineTest {
         // Assert score jumped to >= 60% instantly
         assertTrue(latestReport != null)
         assertEquals(60, latestReport?.riskScore)
-        assertTrue(latestReport?.topSignals?.firstOrNull()?.contains("otp") == true)
+        assertTrue(latestReport?.explanationEn?.contains("otp") == true)
 
         liveRiskAnalyzer.stop()
     }
@@ -40,7 +40,7 @@ class VoipPipelineTest {
         val flow = MutableSharedFlow<TranscriptLine>(extraBufferCapacity = 16)
         var latestReport: RiskReport? = null
 
-        val analyzer = SemanticAnalyzer()
+        val analyzer = SemanticAnalyzer(org.mockito.Mockito.mock(android.content.Context::class.java))
         val liveRiskAnalyzer = LiveRiskAnalyzer(analyzer, "hi") { report ->
             latestReport = report
         }

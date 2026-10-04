@@ -4,6 +4,10 @@ import android.content.Context
 import android.util.Log
 import com.guardian.app.RiskReport
 import com.guardian.app.SemanticAnalyzer
+import android.os.Handler
+import android.os.Looper
+import com.guardian.app.LiveTranscriptBuffer
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -16,21 +20,28 @@ class GuardianAnalysisPipeline(
     private val context: Context? = null,
     private val onRiskUpdate: (RiskReport) -> Unit,
     private val onError: (String) -> Unit = {},
-    private val onPcmChunk: ((ShortArray) -> Unit)? = null
+    private val onPcmChunk: ((ShortArray) -> Unit)? = null,
+    private val onTranscript: (String, Boolean) -> Unit = { _, _ -> },
+    private val onStatus: (String) -> Unit = {},
+    private val onAudioLevel: (Float) -> Unit = {},
+    private val onAnalysisState: (Boolean) -> Unit = {}
 ) {
     companion object {
         private const val TAG = "GuardianAnalysisPipe"
-        private const val MAX_BUFFER_CHARS = 1000
     }
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var sttClient: BhashiniSttClient? = null
     private var nativeFallback: AndroidSpeechRecognizerFallback? = null
     private var sourceLanguage: String = "hi"
-    private val transcriptBuffer = StringBuilder()
+    private val transcriptBuffer = LiveTranscriptBuffer()
+    private val mainHandler = Handler(Looper.getMainLooper())
+    @Volatile private var stopped = false
     private var analysisJob: Job? = null
+    private var analysisRevision = 0
 
     fun start(language: String = "hi") {
+        if (stopped || sttClient != null || nativeFallback != null) return
         sourceLanguage = language
         transcriptBuffer.clear()
 
@@ -40,12 +51,20 @@ class GuardianAnalysisPipeline(
             onTranscript = { text, isFinal ->
                 handleTranscript(text, isFinal)
             },
-            onError = { error ->
-                Log.e(TAG, "STT Pipeline error: $error. Triggering native SpeechRecognizer fallback.")
-                startNativeFallback(language)
-                onError(error)
+            onError = { _ ->
+                mainHandler.post {
+                    if (!stopped) {
+                        // Release AudioRecord before SpeechRecognizer takes the microphone.
+                        sttClient?.stop()
+                        sttClient = null
+                        onStatus("BHASHINI unavailable — switching to Android speech recognition")
+                        startNativeFallback(language)
+                    }
+                }
             },
-            onPcmChunk = onPcmChunk
+            onPcmChunk = onPcmChunk,
+            onStatus = { status -> mainHandler.post { if (!stopped) onStatus(status) } },
+            onAudioLevel = { level -> mainHandler.post { if (!stopped) onAudioLevel(level) } }
         )
 
         try {
@@ -53,13 +72,14 @@ class GuardianAnalysisPipeline(
             Log.d(TAG, "Guardian Bhashini pipeline started with language: $language")
         } catch (e: Exception) {
             Log.e(TAG, "Failed to start Bhashini pipeline: ${e.message}. Triggering fallback.")
+            sttClient?.stop()
+            sttClient = null
             startNativeFallback(language)
-            onError(e.message ?: "Pipeline start failed")
         }
     }
 
     private fun startNativeFallback(language: String) {
-        if (context != null && nativeFallback == null) {
+        if (!stopped && context != null && nativeFallback == null) {
             Log.d(TAG, "Starting native Android SpeechRecognizer fallback for language: $language")
             nativeFallback = AndroidSpeechRecognizerFallback(
                 context = context,
@@ -68,29 +88,26 @@ class GuardianAnalysisPipeline(
                     handleTranscript(text, isFinal)
                 },
                 onError = { err ->
-                    Log.e(TAG, "Native SpeechRecognizer error: $err")
-                }
+                    if (!stopped) onError(err)
+                },
+                onStatus = { if (!stopped) onStatus(it) },
+                onAudioLevel = { if (!stopped) onAudioLevel(it) }
             ).also { it.start() }
+        } else if (!stopped && context == null) {
+            onError("Speech recognition requires an Android context")
         }
     }
 
     private fun handleTranscript(text: String, isFinal: Boolean) {
-        if (text.isBlank()) return
+        mainHandler.post {
+            if (stopped || text.isBlank()) return@post
+            transcriptBuffer.accept(text, isFinal)
+            onTranscript(text, isFinal)
+            if (!isFinal) return@post
+            val currentFullText = transcriptBuffer.context
+            onAnalysisState(true)
 
-        if (isFinal) {
-            synchronized(transcriptBuffer) {
-                if (transcriptBuffer.isNotEmpty()) {
-                    transcriptBuffer.append(" ")
-                }
-                transcriptBuffer.append(text)
-                if (transcriptBuffer.length > MAX_BUFFER_CHARS) {
-                    val excess = transcriptBuffer.length - MAX_BUFFER_CHARS
-                    transcriptBuffer.delete(0, excess)
-                }
-            }
-
-            val currentFullText = synchronized(transcriptBuffer) { transcriptBuffer.toString() }
-
+            val revision = ++analysisRevision
             analysisJob?.cancel()
             analysisJob = scope.launch {
                 try {
@@ -123,16 +140,29 @@ class GuardianAnalysisPipeline(
                         explanationHi = localizedExplanation
                     )
 
-                    onRiskUpdate(finalReport)
+                    mainHandler.post {
+                        if (!stopped && revision == analysisRevision) {
+                            onRiskUpdate(finalReport)
+                            onAnalysisState(false)
+                        }
+                    }
+                } catch (e: CancellationException) {
+                    throw e
                 } catch (e: Exception) {
-                    Log.e(TAG, "Analysis pipeline step failed: ${e.message}")
-                    onError(e.message ?: "Analysis execution error")
+                    mainHandler.post {
+                        if (!stopped && revision == analysisRevision) {
+                            onError("Risk analysis unavailable; transcription can continue.")
+                            onAnalysisState(false)
+                        }
+                    }
                 }
             }
         }
     }
 
     fun stop() {
+        stopped = true
+        mainHandler.removeCallbacksAndMessages(null)
         try {
             sttClient?.stop()
         } catch (_: Exception) {}
@@ -144,9 +174,7 @@ class GuardianAnalysisPipeline(
         nativeFallback = null
 
         analysisJob?.cancel()
-        synchronized(transcriptBuffer) {
-            transcriptBuffer.clear()
-        }
+        transcriptBuffer.clear()
         scope.cancel()
         Log.d(TAG, "Guardian analysis pipeline stopped")
     }

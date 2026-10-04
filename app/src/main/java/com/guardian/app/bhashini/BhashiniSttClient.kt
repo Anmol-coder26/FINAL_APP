@@ -4,6 +4,8 @@ import android.annotation.SuppressLint
 import android.media.AudioFormat
 import android.media.AudioRecord
 import android.media.MediaRecorder
+import android.os.Build
+import kotlin.math.sqrt
 import android.util.Log
 import com.guardian.app.BuildConfig
 import okhttp3.OkHttpClient
@@ -25,7 +27,9 @@ class BhashiniSttClient(
     val mode: Mode = Mode.MICROPHONE,
     private val onTranscript: (text: String, isFinal: Boolean) -> Unit,
     private val onError: (error: String) -> Unit = {},
-    private val onPcmChunk: ((ShortArray) -> Unit)? = null
+    private val onPcmChunk: ((ShortArray) -> Unit)? = null,
+    private val onStatus: (String) -> Unit = {},
+    private val onAudioLevel: (Float) -> Unit = {}
 ) {
     enum class Mode { MICROPHONE, PUSH }
 
@@ -61,6 +65,11 @@ class BhashiniSttClient(
 
     private val wsListener = object : WebSocketListener() {
         override fun onOpen(webSocket: WebSocket, response: Response) {
+            if (!isRecording.get()) {
+                webSocket.close(1000, "Stopped before connection")
+                return
+            }
+            onStatus("BHASHINI connected — listening to microphone")
             Log.d(TAG, "WebSocket connected to Bhashini STT (Mode: $mode, Lang: $activeLanguage)")
             sendStartEvent(webSocket, activeLanguage)
             if (mode == Mode.MICROPHONE) {
@@ -69,21 +78,26 @@ class BhashiniSttClient(
         }
 
         override fun onMessage(webSocket: WebSocket, text: String) {
-            parseServerMessage(text)
+            if (isRecording.get()) parseServerMessage(text)
         }
 
         override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
-            Log.d(TAG, "WebSocket closing: $code / $reason")
+            webSocket.close(code, reason)
         }
 
         override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
-            Log.d(TAG, "WebSocket closed")
+            if (isRecording.get()) {
+                stop()
+                onError("Speech service disconnected")
+            }
         }
 
         override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
             Log.e(TAG, "WebSocket failure: ${t.message}")
-            stop()
-            onError(t.message ?: "STT WebSocket failure")
+            if (isRecording.get()) {
+                stop()
+                onError("STT connection failed")
+            }
         }
     }
 
@@ -93,8 +107,14 @@ class BhashiniSttClient(
             return
         }
 
-        val endpoint = BuildConfig.BHASHINI_STT_ENDPOINT.ifBlank {
-            "wss://api.bhashini.gov.in/v1/stt/stream"
+        val endpoint = BuildConfig.BHASHINI_STT_ENDPOINT.trim()
+        if (endpoint.isBlank()) {
+            onError("BHASHINI streaming endpoint is not configured")
+            return
+        }
+        if (!endpoint.startsWith("wss://") && !endpoint.startsWith("ws://")) {
+            onError("BHASHINI streaming endpoint must use ws:// or wss://")
+            return
         }
 
         if (BuildConfig.BHASHINI_INFERENCE_API_KEY.isBlank()) {
@@ -106,13 +126,18 @@ class BhashiniSttClient(
         activeLanguage = language
         isRecording.set(true)
 
-        val request = Request.Builder()
-            .url(endpoint)
-            .addHeader("Authorization", BuildConfig.BHASHINI_INFERENCE_API_KEY)
-            .addHeader("x-pipeline-id", BuildConfig.BHASHINI_PIPELINE_ID)
-            .build()
-
-        webSocket = client.newWebSocket(request, wsListener)
+        onStatus("Connecting to BHASHINI speech service…")
+        try {
+            val request = Request.Builder()
+                .url(endpoint)
+                .addHeader("Authorization", BuildConfig.BHASHINI_INFERENCE_API_KEY)
+                .addHeader("x-pipeline-id", BuildConfig.BHASHINI_PIPELINE_ID)
+                .build()
+            webSocket = client.newWebSocket(request, wsListener)
+        } catch (_: Exception) {
+            isRecording.set(false)
+            onError("Invalid BHASHINI streaming configuration")
+        }
     }
 
     /**
@@ -120,7 +145,7 @@ class BhashiniSttClient(
      * Automatically handles sample rate resampling to 16,000 Hz and sends 100ms chunks.
      */
     fun pushPcm(samples: ShortArray, sampleRate: Int) {
-        if (!isRecording.get() || webSocket == null || samples.isEmpty()) return
+        if (mode != Mode.PUSH || !isRecording.get() || webSocket == null || samples.isEmpty()) return
 
         val resampled = if (sampleRate == TARGET_SAMPLE_RATE) {
             samples
@@ -202,8 +227,14 @@ class BhashiniSttClient(
     }
 
     @SuppressLint("MissingPermission")
+    @Synchronized
     private fun startAudioStream(ws: WebSocket) {
+        if (!isRecording.get()) return
         val minBufferSize = AudioRecord.getMinBufferSize(TARGET_SAMPLE_RATE, CHANNEL_CONFIG, AUDIO_FORMAT)
+        if (minBufferSize <= 0) {
+            onError("16 kHz microphone recording is unavailable")
+            return
+        }
         val bufferSize = maxOf(minBufferSize, CHUNK_SIZE_BYTES * 4)
 
         try {
@@ -216,8 +247,9 @@ class BhashiniSttClient(
             )
 
             if (audioRecord?.state != AudioRecord.STATE_INITIALIZED) {
+                audioRecord?.release()
                 audioRecord = AudioRecord(
-                    MediaRecorder.AudioSource.DEFAULT,
+                    MediaRecorder.AudioSource.MIC,
                     TARGET_SAMPLE_RATE,
                     CHANNEL_CONFIG,
                     AUDIO_FORMAT,
@@ -225,36 +257,55 @@ class BhashiniSttClient(
                 )
             }
 
+            check(audioRecord?.state == AudioRecord.STATE_INITIALIZED)
             audioRecord?.startRecording()
+            check(audioRecord?.recordingState == AudioRecord.RECORDSTATE_RECORDING)
         } catch (e: Exception) {
             Log.e(TAG, "Failed to initialize AudioRecord: ${e.message}")
             onError("Microphone recording initialization failed")
             return
         }
 
+        val recorder = audioRecord ?: return
         recordingThread = Thread({
             val audioBuffer = ByteArray(CHUNK_SIZE_BYTES)
-            while (isRecording.get()) {
-                val readBytes = audioRecord?.read(audioBuffer, 0, audioBuffer.size) ?: -1
-                if (readBytes > 0) {
-                    val byteString = audioBuffer.toByteString(0, readBytes)
-                    ws.send(byteString)
-
-                    if (onPcmChunk != null && readBytes >= 2) {
-                        val shortCount = readBytes / 2
-                        val shortArr = ShortArray(shortCount)
-                        ByteBuffer.wrap(audioBuffer, 0, readBytes)
-                            .order(ByteOrder.LITTLE_ENDIAN)
-                            .asShortBuffer()
-                            .get(shortArr)
-                        onPcmChunk.invoke(shortArr)
+            var quietChunks = 0
+            var lastStatus = ""
+            try {
+                while (isRecording.get()) {
+                    val readBytes = recorder.read(audioBuffer, 0, audioBuffer.size)
+                    if (readBytes <= 0) {
+                        if (isRecording.get()) onError("Microphone capture stopped. Check microphone access.")
+                        break
+                    }
+                    if (!isRecording.get()) break
+                    val samples = ShortArray(readBytes / 2)
+                    ByteBuffer.wrap(audioBuffer, 0, readBytes).order(ByteOrder.LITTLE_ENDIAN)
+                        .asShortBuffer().get(samples)
+                    val rms = sqrt(samples.sumOf { it.toDouble() * it } / samples.size)
+                    quietChunks = if (rms < 30) quietChunks + 1 else 0
+                    // Poll capture policy too: the OS can silently give an ordinary app zero PCM.
+                    val silenced = Build.VERSION.SDK_INT >= 29 &&
+                        recorder.activeRecordingConfiguration?.isClientSilenced == true
+                    val status = when {
+                        silenced -> "Android is silencing this microphone during the call. Use SuSagi on a second device beside the speakerphone."
+                        quietChunks >= 80 -> "No audible speech. Check speaker volume and microphone access; try a second listening device if this phone is in a SIM call."
+                        else -> "BHASHINI connected — microphone audio available"
+                    }
+                    if (status != lastStatus) { onStatus(status); lastStatus = status }
+                    onAudioLevel((rms / 5000).toFloat().coerceIn(0f, 1f))
+                    if (!silenced) {
+                        if (ws.queueSize() > 320000 || !ws.send(audioBuffer.toByteString(0, readBytes))) {
+                            onError("Speech connection cannot keep up with live audio")
+                            break
+                        }
+                        onPcmChunk?.invoke(samples)
                     }
                 }
+            } catch (_: Exception) {
+                if (isRecording.get()) onError("Microphone capture failed")
             }
-        }, "BhashiniAudioStream").apply {
-            priority = Thread.MAX_PRIORITY
-            start()
-        }
+        }, "BhashiniAudioStream").apply { start() }
     }
 
     private fun parseServerMessage(jsonStr: String) {
@@ -263,6 +314,7 @@ class BhashiniSttClient(
             val event = json.optString("event", "")
 
             when (event) {
+                "error" -> onError("BHASHINI rejected the speech session. Check endpoint and credentials.")
                 "speech_start" -> Log.v(TAG, "Bhashini speech_start")
                 "speech_pause" -> Log.v(TAG, "Bhashini speech_pause")
                 "speech_resume" -> Log.v(TAG, "Bhashini speech_resume")
@@ -301,6 +353,7 @@ class BhashiniSttClient(
         }
     }
 
+    @Synchronized
     fun stop() {
         if (!isRecording.getAndSet(false)) return
 
@@ -312,10 +365,11 @@ class BhashiniSttClient(
 
         webSocket = null
 
-        try {
-            audioRecord?.stop()
-            audioRecord?.release()
-        } catch (_: Exception) {}
+        try { audioRecord?.stop() } catch (_: Exception) {}
+        if (Thread.currentThread() != recordingThread) {
+            try { recordingThread?.join(500) } catch (_: InterruptedException) {}
+        }
+        try { audioRecord?.release() } catch (_: Exception) {}
 
         audioRecord = null
         recordingThread?.interrupt()

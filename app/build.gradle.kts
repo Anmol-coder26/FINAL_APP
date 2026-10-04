@@ -5,7 +5,12 @@ plugins {
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
     id("com.google.devtools.ksp")
-    id("com.google.gms.google-services")
+
+}
+
+// Speech-only submission builds do not require Firebase provisioning.
+if (file("google-services.json").exists()) {
+    apply(plugin = "com.google.gms.google-services")
 }
 
 val localProperties = Properties().apply {
@@ -146,5 +151,7 @@ dependencies {
 
     debugImplementation("androidx.compose.ui:ui-tooling")
     testImplementation("junit:junit:4.13.2")
+    testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.8.1")
+    testImplementation("org.mockito:mockito-core:5.12.0")
     testImplementation("org.json:json:20231013")
 }
