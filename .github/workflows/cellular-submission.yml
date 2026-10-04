@@ -22,14 +22,16 @@ jobs:
         with:
           gradle-version: '8.9'
       - name: Build microphone-listening APK (Android recognition fallback)
-        run: gradle :app:assembleDebug --stacktrace
+        run: gradle :app:assembleDebug -PsubmissionDemo=true --stacktrace
       - uses: actions/upload-artifact@v4
         with:
-          name: SuSagi-speakerphone-assist-debug
+          name: SuSagi-Demo-separate-install
           path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
-      - name: Verify transcript accumulation
-        run: gradle :app:testDebugUnitTest --tests com.guardian.app.LiveTranscriptBufferTest --stacktrace
+      - name: Run all existing and new unit tests
+        run: gradle :app:testDebugUnitTest -PsubmissionDemo=true --stacktrace
+      - name: Check configured app build keeps original package
+        run: gradle :app:processDebugMainManifest -PsubmissionDemo=false --stacktrace
       - uses: actions/upload-artifact@v4
         if: always()
         with:

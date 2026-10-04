@@ -25,7 +25,9 @@ macOS/Linux:
 ./gradlew :app:testDebugUnitTest --tests com.guardian.app.LiveTranscriptBufferTest
 ```
 
-Use JDK 17 and Android SDK platform 35. Firebase features require your own `app/google-services.json`; it is optional for this speech-listening build. No credentials are included. The branch workflow builds a debug APK using Android speech recognition when BHASHINI is unconfigured. Download it from the Actions run's `SuSagi-speakerphone-assist-debug` artifact if the build succeeds.
+Use JDK 17 and Android SDK platform 35. Firebase features require your own `app/google-services.json`; it is optional for this speech-listening build. No credentials are included. The branch workflow builds **SuSagi Demo** (`com.guardian.app.submission`) with `-PsubmissionDemo=true`. It installs beside the existing app and keeps separate data, permissions, and notification access. Download it from the Actions run's `SuSagi-Demo-separate-install` artifact if the build succeeds. The earlier APK/QR from run 37187012635 used the original package name; use the new separate-install artifact for testing instead.
+
+A normal local build without `-PsubmissionDemo=true` retains `com.guardian.app`, your existing app name, and your ignored configuration files. Cloud features require your own current `local.properties`, backend deployment, and Firebase configuration. The downloadable demo has no private keys and cannot establish that those integrations work. Build with your existing configuration and verify each integration before updating the installed app. Do not uninstall the existing app to install a demo.
 
 The listening device needs a working Android speech recognition service (e.g. an enabled Google speech service). Provider language support, partial-result availability, network needs, and gaps between recognition sessions vary. This is near-real-time transcription, not a promise of lossless or zero-latency streaming.
 
@@ -47,7 +49,7 @@ For online reasoning configure `GEMINI_API_KEY` separately. The repository's exi
 
 Incoming-call detection posts an ordinary notification. It does not start a microphone foreground service from the background, which can be rejected by newer Android versions. Tap the notification, then Start, or open Live Defense manually if notifications are disabled.
 
-1. Install SuSagi on the listening device. Enable its speech service and grant microphone permission.
+1. Install SuSagi Demo on the listening device, keeping the current SuSagi app installed. Enable its speech service and grant microphone permission.
 2. Open Live Defense. Select Hindi or English before starting.
 3. Make/answer a real call on the call phone and enable speakerphone. Tell participants the conversation will be transcribed by a speech provider.
 4. First try `Mode: call on this phone` with SuSagi visible on the call phone. Tap `Start live transcription`. Speak ordinary sentences and confirm actual words appear.

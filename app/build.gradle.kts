@@ -8,8 +8,11 @@ plugins {
 
 }
 
-// Speech-only submission builds do not require Firebase provisioning.
-if (file("google-services.json").exists()) {
+// The downloadable demo installs beside the configured app, with its own data.
+val submissionDemo = providers.gradleProperty("submissionDemo").map { it.toBoolean() }.getOrElse(false)
+
+// Configured builds keep the existing Firebase configuration and package identity.
+if (!submissionDemo && file("google-services.json").exists()) {
     apply(plugin = "com.google.gms.google-services")
 }
 
@@ -25,7 +28,8 @@ android {
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "com.guardian.app"
+        applicationId = if (submissionDemo) "com.guardian.app.submission" else "com.guardian.app"
+        manifestPlaceholders["appLabel"] = if (submissionDemo) "SuSagi Demo" else "@string/app_name"
         minSdk = 26
         targetSdk = 35
         versionCode = 1
